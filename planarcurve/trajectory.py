@@ -29,7 +29,14 @@ class HeadingRateChange:
 
 @dataclass(frozen=True)
 class HeadingRateProfile:
-    """Piecewise heading-rate profile over normalized progress."""
+    """Heading-rate knots and interpolation over normalized progress.
+
+    ``start_rate_deg_per_u`` and ``end_rate_deg_per_u`` are rates in degrees
+    per unit ``u``. ``changes`` contains strictly ordered interior knots with
+    ``at`` values in ``(0, 1)``. ``interpolation`` is ``"linear"`` or
+    ``"cubic-hermite"``. The latter computes shape-preserving slopes from the
+    rate knots; callers do not supply derivative values.
+    """
 
     start_rate_deg_per_u: float
     end_rate_deg_per_u: float
@@ -52,7 +59,14 @@ class HeadingRateProfile:
 
 @dataclass(frozen=True)
 class Trajectory2D:
-    """Planar curve with constant speed and a piecewise heading-rate profile."""
+    """Constant-speed planar curve defined by a normalized heading-rate profile.
+
+    The trajectory starts at ``(0, 0)``. ``length`` is its positive geometric
+    arc length, ``start_heading_deg`` is measured in degrees, and
+    ``heading_rate`` is measured in degrees per unit normalized progress ``u``.
+    Theoretical arc length is ``length * u``; positions are obtained by
+    numerical integration of the heading-derived tangent.
+    """
 
     length: float
     start_heading_deg: float
@@ -71,7 +85,11 @@ class Trajectory2D:
 
 @dataclass(frozen=True)
 class Pose2D:
-    """Position, heading, and heading rate at one trajectory endpoint."""
+    """One trajectory endpoint pose.
+
+    ``position`` is a two-element vector in coordinate units. ``heading_deg``
+    is in degrees; ``heading_rate_deg_per_u`` is in degrees per unit progress.
+    """
 
     position: FloatArray
     heading_deg: float
@@ -80,7 +98,27 @@ class Pose2D:
 
 @dataclass(frozen=True)
 class TrajectorySample:
-    """Sampled trajectory fields at normalized progress values."""
+    """Samples of a trajectory at uniformly spaced normalized progress values.
+
+    Attributes
+    ----------
+    u : (count,) float array
+        Normalized progress in ``[0, 1]`` (dimensionless).
+    xy : (count, 2) float array
+        Numerically integrated positions in trajectory coordinate units. The
+        first position is the origin.
+    heading_deg : (count,) float array
+        Heading angles in degrees.
+    heading_rate_deg_per_u : (count,) float array
+        Heading rates in degrees per unit normalized progress.
+    tangent : (count, 2) float array
+        Dimensionless unit tangent vectors.
+    arc_length : (count,) float array
+        Theoretical arc lengths in coordinate units, equal to ``trajectory.length * u``.
+    end_pose : Pose2D
+        At ``u=1``: position shape ``(2,)`` in coordinate units, heading in
+        degrees, and heading rate in degrees per unit ``u``.
+    """
 
     u: FloatArray
     xy: FloatArray
@@ -230,6 +268,34 @@ def curvature(trajectory: Trajectory2D, u: ArrayLike) -> FloatArray:
 
 
 def evaluate_trajectory(trajectory: Trajectory2D, *, count: int = 256) -> TrajectorySample:
+    """Sample a trajectory at uniformly spaced normalized progress values.
+
+    Parameters
+    ----------
+    trajectory : Trajectory2D
+        The curve to evaluate.
+    count : int, optional
+        Number of samples, including both endpoints. Must be at least 2 and an
+        integer value.
+
+    Returns
+    -------
+    TrajectorySample
+        Sample arrays for progress, position, heading, heading rate, unit
+        tangent, theoretical arc length, and the end pose.
+
+    Raises
+    ------
+    ValueError
+        If ``count`` is not an integer of at least 2.
+
+    Notes
+    -----
+    Positions use adaptive numerical integration of the heading-derived
+    tangent. Heading and heading rate are evaluated from the profile, while
+    theoretical sample arc length is exactly ``trajectory.length * u`` up to
+    floating-point arithmetic.
+    """
     count = _require_integer(count, name="count", minimum=2)
     u = np.linspace(0.0, 1.0, count)
     rates = evaluate_heading_rate(trajectory.heading_rate, u)
@@ -389,10 +455,32 @@ def _cubic_value(
 def trajectory_to_cubic_path(
     trajectory: Trajectory2D, *, max_error: float = 1e-4, max_depth: int = 16
 ) -> CubicPath:
-    """Approximate a trajectory with cubics using quarter-point error checks.
+    """Approximate a trajectory with cubic Beziers using sampled error checks.
 
-    Each piece is recursively subdivided until the trajectory and cubic differ
-    by at most ``max_error`` at its quarter, midpoint, and three-quarter points.
+    Each profile interval is recursively subdivided until the cubic and
+    trajectory positions differ by at most ``max_error`` at local parameters
+    0.25, 0.5, and 0.75. The criterion is sampled and is not a continuous
+    global Hausdorff error bound.
+
+    Parameters
+    ----------
+    trajectory : Trajectory2D
+        The trajectory to approximate.
+    max_error : float, optional
+        Positive coordinate-space error threshold at the three check points.
+    max_depth : int, optional
+        Maximum recursive subdivision depth per profile interval.
+
+    Returns
+    -------
+    CubicPath
+        A chain of cubic segments with the trajectory's starting point.
+
+    Raises
+    ------
+    ValueError
+        If the tolerance is invalid or the sampled criterion cannot be met
+        within ``max_depth``.
     """
     if not isfinite(max_error) or max_error <= 0.0:
         raise ValueError("max_error must be positive and finite")

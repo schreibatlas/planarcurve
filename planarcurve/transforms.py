@@ -11,7 +11,12 @@ from .types import FloatArray
 
 @dataclass(frozen=True)
 class Affine2D:
-    """2D affine map with row-major linear coefficients and translation."""
+    """2D affine map with row-major linear coefficients and translation.
+
+    Points are mapped as ``[x', y'] = [[m00, m01], [m10, m11]] @ [x, y] + [dx, dy]``.
+    ``apply_vectors()`` uses only the linear matrix. ``compose(other)`` means
+    ``self ∘ other``: apply ``other`` first, then ``self``.
+    """
 
     m00: float = 1.0
     m01: float = 0.0
@@ -131,7 +136,12 @@ class Affine2D:
 
 @dataclass(frozen=True)
 class Similarity2D:
-    """Uniform scale, rotation, and translation in two dimensions."""
+    """Positive uniform scale, rotation in degrees, and translation in 2D.
+
+    Applying the transform scales and rotates a point, then adds ``(dx, dy)``.
+    ``as_affine()`` returns the equivalent affine map. This representation
+    preserves shape because it does not include nonuniform scale or shear.
+    """
 
     scale: float = 1.0
     rotation_deg: float = 0.0

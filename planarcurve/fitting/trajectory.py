@@ -37,7 +37,16 @@ from .parameters import (
 
 @dataclass(frozen=True)
 class TrajectoryFitOptions:
-    """Optimization settings for normalized trajectory fitting."""
+    """Optimization settings for fitting normalized heading-rate profiles.
+
+    Model complexity is set by ``change_count``, ``min_change_spacing``, and
+    ``max_heading_rate_deg_per_u``. Sampling/initialization uses ``samples`` and
+    ``smoothing_window``. ``restarts``, ``seed``, ``robust_scale``, and
+    ``max_nfev`` configure optimization. The dimensionless ``*_weight`` fields
+    scale residual groups, while ``heading_sigma_deg``, ``turn_sigma_deg``, and
+    ``smoothness_sigma_deg_per_u`` specify residual scales. See the fitting
+    guide for the complete option table and units.
+    """
 
     change_count: int
     samples: int = 64
@@ -368,7 +377,28 @@ def _profile_residuals(
 
 
 def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> TrajectoryFitResult:
-    """Fit one normalized trajectory and a similarity transform to ordered points."""
+    """Fit a normalized trajectory profile and a similarity placement to points.
+
+    The fitted profile has length 1 and starting heading 0 degrees. Its
+    occurrence is placed by a separate positive-scale ``Similarity2D``. Position
+    residuals are normalized by observed polyline length; heading, turn, and
+    smoothness residuals use their configured sigma scales. Optimization uses a
+    robust least-squares loss.
+
+    Parameters
+    ----------
+    points : array_like, shape (N, 2)
+        Ordered finite samples of one observed curve.
+    options : TrajectoryFitOptions
+        Model, sampling, and optimization settings.
+
+    Returns
+    -------
+    TrajectoryFitResult
+        Fitted canonical profile, placement transform, optimizer status/cost,
+        and position/heading metrics. Inspect ``success`` and ``cost`` rather
+        than assuming that a result object implies convergence.
+    """
     target_points, target_heading, target_length = _target_state(points, options)
     codec = _ProfileCodec(options)
     positions, rates = _initial_profile(target_points, target_heading, options)
@@ -439,7 +469,27 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
 def fit_shared_trajectory_profile(
     occurrences: Sequence[ArrayLike], options: TrajectoryFitOptions
 ) -> SharedTrajectoryFitResult:
-    """Fit one normalized trajectory profile shared by transformed occurrences."""
+    """Fit one normalized profile shared across transformed occurrences.
+
+    The shared profile has length 1 and starting heading 0 degrees. Each input
+    occurrence receives its own positive-scale ``Similarity2D`` placement.
+    Position residuals are normalized by each occurrence's observed length;
+    heading, turn, and smoothness residuals use the configured sigma scales.
+    The optimizer uses a robust least-squares loss.
+
+    Parameters
+    ----------
+    occurrences : sequence of array_like, each shape (N, 2)
+        Ordered finite samples for one or more observed curves.
+    options : TrajectoryFitOptions
+        Shared profile, sampling, and optimization settings.
+
+    Returns
+    -------
+    SharedTrajectoryFitResult
+        The common profile, one transform per occurrence, optimizer
+        status/cost, and aggregate metrics. Inspect ``success`` and ``cost``.
+    """
     if not occurrences:
         raise ValueError("at least one occurrence is required")
     states = [_target_state(points, options) for points in occurrences]

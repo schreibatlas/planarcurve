@@ -45,10 +45,14 @@ class CubicSegment:
 
 @dataclass(frozen=True)
 class CubicPath:
-    """A cubic chain with an explicit starting point."""
+    """A cubic chain with an explicit starting point.
+
+    Each segment stores its two control points and end point; its start is the
+    path start or previous segment endpoint. ``segments`` accepts a sequence
+    and is normalized to a tuple during construction.
+    """
 
     start: PointLike
-    segments: tuple[CubicSegment, ...]
     segments: Sequence[CubicSegment]
 
     def __post_init__(self) -> None:

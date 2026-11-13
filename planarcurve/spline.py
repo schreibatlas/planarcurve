@@ -23,7 +23,15 @@ from .types import CubicPath, CubicSegment, FloatArray, _finite_point, _require_
 
 @dataclass(frozen=True)
 class BSplineCurve:
-    """Clamped cubic B-spline on [0, 1] with simple interior knots."""
+    """Clamped cubic B-spline on ``[0, 1]`` with simple interior knots.
+
+    A curve requires degree 3, at least four finite 2D control points, and
+    ``n_control_points + 4`` finite, nondecreasing knots. The first and last
+    four knots must be 0 and 1 respectively. Interior knots must be distinct
+    and lie strictly inside ``(0, 1)``. This supported subset enables
+    predictable conversion to cubic Bezier spans; it is not a general SciPy
+    ``BSpline`` wrapper. See the spline concepts page for the rationale.
+    """
 
     knots: ArrayLike
     control_points: ArrayLike
@@ -63,7 +71,21 @@ class BSplineCurve:
 
 @dataclass(frozen=True)
 class CurveEvaluation:
-    """Spline positions and optional differential geometry at sample parameters."""
+    """Spline evaluation arrays at normalized parameter values.
+
+    Attributes
+    ----------
+    u : (N,) float array
+        Parameters in ``[0, 1]``.
+    xy : (N, 2) float array
+        Evaluated 2D positions, in the geometry's coordinate units.
+    tangent : (N, 2) float array or None
+        Unit tangent vectors, or ``None`` when derivatives were not requested.
+    curvature : (N,) float array or None
+        Signed geometric curvature in inverse coordinate units, or ``None``
+        when derivatives were not requested. Degenerate derivative locations
+        produce zero values.
+    """
 
     u: FloatArray
     xy: FloatArray
@@ -169,7 +191,14 @@ def sample_curve_by_arclength(
     *,
     transform: Affine2D | None = None,
 ) -> CurveEvaluation:
-    """Sample the spline approximately uniformly by transformed arc length."""
+    """Sample approximately uniformly in transformed arc length.
+
+    A dense grid of ``max(1024, count * 32)`` parameter values is evaluated,
+    chord lengths are accumulated, and target distances are interpolated back
+    to parameter values. The optional transform is included in the distance
+    calculation. This is a sampled approximation, not exact arc-length
+    inversion.
+    """
     count = _require_integer(count, name="count", minimum=2)
     dense_u = np.linspace(0.0, 1.0, max(1024, count * 32))
     dense = evaluate_bspline(geometry, dense_u, transform=transform, derivatives=False).xy

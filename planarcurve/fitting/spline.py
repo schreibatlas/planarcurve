@@ -30,7 +30,15 @@ class SplineObservation:
 
 @dataclass(frozen=True)
 class SplineFitOptions:
-    """Regularization, robust-fit, and endpoint settings for spline fitting."""
+    """Regularization, robust-fit, and endpoint settings for spline fitting.
+
+    ``smoothness`` penalizes second differences of control points, and
+    ``seed_weight`` regularizes controls toward the seed. IRLS downweights
+    residuals larger than ``robust_scale`` for ``irls_iterations`` solves.
+    ``endpoint_policy`` independently chooses ``free``, ``locked``, or
+    ``anchored`` for each endpoint. Anchored endpoints are softly pulled toward
+    the seed with scale ``endpoint_sigma``. See the fitting guide for details.
+    """
 
     smoothness: float = 0.02
     seed_weight: float = 0.01
@@ -132,7 +140,29 @@ def fit_spline_control_points(
     seed_control_points: ArrayLike | None = None,
     options: SplineFitOptions | None = None,
 ) -> SplineFitResult:
-    """Fit shared B-spline controls with sparse weighted least squares and IRLS."""
+    """Fit shared B-spline controls with sparse weighted least squares and IRLS.
+
+    Observations may have per-point nonnegative weights. Smoothness and seed
+    penalties regularize the controls; IRLS reduces the influence of large
+    residuals. Endpoint policy determines whether seed endpoints are free,
+    fixed, or softly anchored.
+
+    Parameters
+    ----------
+    basis : BSplineCurve
+        Supported cubic spline geometry providing knots and initial controls.
+    observations : sequence of SplineObservation
+        Samples at normalized parameters, optionally weighted per point.
+    seed_control_points : array_like, shape (n_control_points, 2), optional
+        Controls used as the regularization seed. Defaults to the basis controls.
+    options : SplineFitOptions, optional
+        Smoothness, robust-fit, and endpoint settings.
+
+    Returns
+    -------
+    SplineFitResult
+        Fitted curve, residual RMS, and configured IRLS iteration count.
+    """
     if options is None:
         options = SplineFitOptions()
     parameter_arrays, observed_xy, base_weights = _validated_observations(observations)

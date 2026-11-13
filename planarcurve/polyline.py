@@ -88,7 +88,21 @@ def bounding_box(points: ArrayLike) -> tuple[float, float, float, float]:
 
 @dataclass(frozen=True)
 class PolylineProjection:
-    """Nearest-point projection results for an array of query points."""
+    """Nearest-point results, one row per query point.
+
+    Attributes
+    ----------
+    point : (M, 2) float array
+        Projected points on the polyline.
+    distance : (M,) float array
+        Euclidean distance from each query to its projection.
+    segment_index : (M,) integer array
+        Index of the winning segment in the input polyline.
+    segment_t : (M,) float array
+        Clamped local parameter in ``[0, 1]`` on the winning segment.
+    arc_length : (M,) float array
+        Cumulative distance from the polyline start to each projection.
+    """
 
     point: FloatArray
     distance: FloatArray
@@ -98,7 +112,31 @@ class PolylineProjection:
 
 
 def project_points_to_polyline(points: ArrayLike, polyline: ArrayLike) -> PolylineProjection:
-    """Project query points onto all segments and retain each nearest result."""
+    """Project each query onto the nearest segment of a 2D polyline.
+
+    Every query is compared with every segment. For ``M`` queries and ``N``
+    segments, both time and temporary memory are ``O(M*N)``. Zero-length
+    segments are allowed and contribute their endpoint as a candidate.
+
+    Parameters
+    ----------
+    points : array_like, shape (M, 2)
+        Finite query points.
+    polyline : array_like, shape (K, 2)
+        Finite polyline vertices, with at least two rows.
+
+    Returns
+    -------
+    PolylineProjection
+        Nearest points, distances, winning segment indices and local
+        parameters, and cumulative arc lengths from the polyline start.
+
+    Raises
+    ------
+    ValueError
+        If the inputs are not finite 2D arrays or the polyline has fewer than
+        two vertices.
+    """
     queries = _points(points)
     vertices = _points(polyline)
     if len(vertices) < 2:

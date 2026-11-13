@@ -21,11 +21,25 @@ from .types import CubicBezier, FloatArray, Point2D, PointLike, QuadraticBezier,
 
 @dataclass(frozen=True)
 class PathInfo:
-    """Aggregate geometry metadata across an SVG path's subpaths.
+    """Aggregate sampled geometry metadata across SVG subpaths.
 
-    ``start`` and ``tangent_start`` refer to the first subpath, while ``end``
-    and ``tangent_end`` refer to the last. ``closed`` is true only when every
-    subpath is closed; ``subpath_closed`` records each subpath's status.
+    Attributes
+    ----------
+    start, end : 2-tuples of float
+        First point of the first subpath and last point of the last subpath.
+    tangent_start, tangent_end : 2-tuples of float or None
+        Unit endpoint directions for the first and last subpaths, or ``None``
+        when no nonzero sampled segment provides a direction.
+    length : float
+        Sum of sampled subpath chord lengths, in path coordinate units.
+    bbox : (xmin, ymin, xmax, ymax)
+        Bounds of the sampled path points, in path coordinate units.
+    move_count : int
+        Number of parsed subpaths.
+    closed : bool
+        True only when every subpath is closed.
+    subpath_closed : tuple of bool
+        Closed status for each subpath, in path order.
     """
 
     start: Point2D
@@ -168,7 +182,12 @@ def _endpoint_direction(points: FloatArray, *, from_start: bool) -> Point2D | No
 
 
 def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
-    """Inspect sampled geometry; curve lengths and endpoint tangents are approximations."""
+    """Analyze sampled SVG path geometry and report aggregate metadata.
+
+    Curves are sampled into ``samples_per_curve`` intervals. Length and
+    endpoint tangent estimates therefore depend on that sampling density; the
+    bounding box is also computed from sampled points.
+    """
     subpaths, closed_subpaths = _sample_subpaths(path, samples_per_curve)
     all_points = np.concatenate(subpaths, axis=0)
     first_direction = _endpoint_direction(subpaths[0], from_start=True)

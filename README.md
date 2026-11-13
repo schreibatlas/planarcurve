@@ -2,6 +2,7 @@
 
 `planarcurve` provides numerical building blocks for planar polylines, Bezier curves, cubic B-splines, normalized heading-rate trajectories, transforms, fitting, and SVG paths. Core geometry uses NumPy and remains independent of application-specific models.
 
+**Documentation:** [Guides, concepts, and API reference](https://planarcurve.readthedocs.io/en/latest/).
 ## Install
 
 ```bash
@@ -71,48 +72,23 @@ print(sample.xy[-1], trajectory_total_turn(trajectory))
 Here `u` is normalized progress in `[0, 1]`. Heading rates are degrees per unit progress. Geometric curvature is signed inverse length and equals `radians(heading_rate) / trajectory.length`.
 
 ## Fitting
+## Fitting
 
-Trajectory fitting uses a unit-length, zero-heading canonical profile and a separate similarity transform for each occurrence. Position residuals are divided by the observed occurrence's length. Heading, total-turn, and smoothness residuals are scaled by their configured angular or rate sigmas, then multiplied by dimensionless weights. Reported position error metrics use the input coordinate units.
-
-```python
-import numpy as np
-from planarcurve.fitting.trajectory import TrajectoryFitOptions, fit_trajectory
-
-points = np.array([[0, 0], [1, 0], [2, 1], [3, 2], [4, 2]], dtype=float)
-fit = fit_trajectory(points, TrajectoryFitOptions(change_count=1, samples=48, restarts=0))
-assert fit.success
-print(fit.metrics)
-```
-
-Spline fitting uses sparse weighted least squares with iteratively reweighted residuals. `SplineEndpointPolicy` defaults to free endpoints. Choose locked or anchored endpoints explicitly when a fit requires them.
-
+Fitting requires SciPy. Spline fitting estimates shared control points with weighted sparse least squares and IRLS. Trajectory fitting uses a normalized length-1, zero-heading profile plus a similarity transform for each occurrence. See the [fitting guide](https://planarcurve.readthedocs.io/en/latest/guides/fitting.html) for residual units, endpoint policies, options, and metrics.
 ## Supported spline geometry
 
-`BSplineCurve` supports cubic B-splines only. For `n` control points, the knot vector must contain `n + 4` finite values, start with four zeros, end with four ones, and have strictly increasing interior values in `(0, 1)`. At least four finite 2D control points are required. Spline evaluation, derivatives, and conversion require SciPy.
-
-`HeadingRateProfile(interpolation="cubic-hermite")` computes shape-preserving Hermite slopes from its rate knots. Callers provide knot positions and rates, not derivative values. The `linear` option uses piecewise-linear rates.
-
+`BSplineCurve` intentionally supports clamped cubic geometry with simple interior knots, not arbitrary SciPy spline configurations. The `cubic-hermite` heading-rate mode computes shape-preserving slopes from rate knots; callers do not supply derivative values. See [spline concepts](https://planarcurve.readthedocs.io/en/latest/concepts/splines.html) for the full contract.
 ## Numerical contracts
 
 | Operation | Contract |
 | --- | --- |
-| Heading and total-turn evaluation | Exact piecewise antiderivative of the selected heading-rate interpolation. |
-| Theoretical trajectory arc length | Exactly `length * u`; returned sample arc lengths do not depend on the position integrator. |
-| Trajectory positions | Adaptive numerical integration of the heading-derived unit tangent. Accuracy is controlled by integration tolerances and depth. |
-| Polyline length and resampling | Exact for the supplied piecewise-linear polyline, up to floating-point arithmetic. |
-| Bezier evaluation, derivatives, tangent, and curvature | Analytic evaluation, up to floating-point arithmetic. |
-| Bezier flattening and length | Adaptive numerical approximations controlled by tolerance and maximum depth. |
-| B-spline evaluation and derivatives | Analytic spline evaluation through SciPy. Arc-length sampling uses a dense sampled approximation. |
-| Trajectory-to-cubic conversion | Adaptive pieces are checked at quarter, midpoint, and three-quarter parameters. The tolerance is a sampled criterion, not a formal continuous error bound. |
-| SVG Bezier lengths and endpoint tangents | Sampled approximations controlled by `samples_per_curve`. |
+| Heading and theoretical trajectory arc length | Piecewise heading integration is analytic; arc length is exactly `length * u`. |
+| Trajectory positions and trajectory-to-cubic conversion | Adaptive numerical integration and sampled error checks, not a continuous global bound. |
+| Polyline length and Bezier evaluation/derivatives | Exact for the supplied geometry, up to floating-point arithmetic. |
+| Bezier flattening/length and B-spline arc-length sampling | Adaptive or dense-sample approximations. |
+| SVG curve lengths and endpoint tangents | Sampled approximations controlled by `samples_per_curve`. |
 
-Function inputs that accept arrays use NumPy array-like values; public numerical outputs use float arrays. Point values must contain exactly two finite coordinates.
-
-Polyline projection compares every query point with every segment. Its current time and temporary memory costs are `O(M*N)` for `M` queries and `N` segments.
-
-`sample_path()` accepts exactly one SVG subpath. For multiple subpaths, use `sample_subpaths()` to receive separate arrays without artificial connecting segments. `PathInfo.closed` is true only when all subpaths are closed; `subpath_closed` reports each status. Its start and start tangent refer to the first subpath, and its end and end tangent refer to the last.
-
-NumPy arrays stored in frozen result dataclasses remain writable. Frozen dataclasses prevent field reassignment, not mutation of the arrays they contain.
+Public points are finite 2D coordinates. Polyline projection compares every query with every segment, using `O(M*N)` time and temporary memory. SVG `sample_path()` accepts one subpath; use `sample_subpaths()` to preserve multiple subpaths without artificial connectors. Frozen result dataclasses do not make embedded NumPy arrays immutable.
 
 ## Optional dependencies and examples
 
@@ -130,7 +106,7 @@ python examples/fit_polyline_to_spline.py
 python examples/fit_shared_trajectory.py
 ```
 
-The synthetic, Matplotlib-free examples are documented in the [examples guide](https://github.com/schreibatlas/planarcurve/blob/main/examples/README.md). The [trajectory gallery](https://github.com/schreibatlas/planarcurve/blob/main/examples/trajectory_gallery.py), [Bezier basics](https://github.com/schreibatlas/planarcurve/blob/main/examples/bezier_basics.py), [spline conversion](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py), [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py), [spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py), and [shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) scripts write SVG output where applicable.
+See the [examples guide](https://planarcurve.readthedocs.io/en/latest/examples.html) for all six scripts, their optional dependencies, and generated output.
 
 ## API stability and provenance
 
