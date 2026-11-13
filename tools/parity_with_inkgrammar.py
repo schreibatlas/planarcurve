@@ -7,9 +7,9 @@ Usage:
 from __future__ import annotations
 
 import numpy as np
-
 from inkgrammar.fitting.curvature import evaluate_curvature_stroke as ink_evaluate
 from inkgrammar.fitting.models import CurvatureStrokeGeometry as InkGeometry
+
 from planarcurve.curvature import (
     CurvatureChange,
     CurvatureProfile,

@@ -18,6 +18,7 @@ include = [
   "**/*.yml",
   "**/*.ssmd",
   "LICENSE",
+  "planarcurve/py.typed",
 ]
 split_max_chars = 0
 layout = "full"

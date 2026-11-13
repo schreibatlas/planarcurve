@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  full:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,4 +19,45 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e ".[dev]"
       - run: ruff check .
-      - run: pytest
+      - run: python -m pytest
+      - run: python -m build
+      - run: python -m twine check dist/*
+
+  core-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install .
+      - run: python -m pip install pytest
+      - run: >-
+          python -c 'import sys; import planarcurve; import planarcurve.polyline;
+          import planarcurve.transforms; assert "scipy" not in sys.modules;
+          assert "fontTools" not in sys.modules'
+      - run: python -m pytest tests/test_curvature.py tests/test_polyline_bezier.py tests/test_transforms.py
+
+  wheel-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install build
+      - run: python -m build --wheel
+      - run: python -m venv /tmp/planarcurve-wheel
+      - run: /tmp/planarcurve-wheel/bin/python -m pip install dist/*.whl
+      - run: >-
+          /tmp/planarcurve-wheel/bin/python -c 'from importlib.resources import files;
+          import sys; import planarcurve; from planarcurve.trajectory import
+          HeadingRateProfile, Trajectory2D, trajectory_total_turn;
+          assert files("planarcurve").joinpath("py.typed").is_file();
+          assert trajectory_total_turn(Trajectory2D(1.0, 0.0,
+          HeadingRateProfile(90.0, 90.0, interpolation="linear"))) == 90.0;
+          assert "scipy" not in sys.modules and "fontTools" not in sys.modules'

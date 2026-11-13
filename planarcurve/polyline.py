@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 
@@ -16,6 +18,13 @@ def cumulative_arclength(points: np.ndarray) -> np.ndarray:
         return np.empty(0, dtype=float)
     lengths = np.linalg.norm(np.diff(values, axis=0), axis=1)
     return np.concatenate(([0.0], np.cumsum(lengths)))
+
+
+def normalized_arclength(points: np.ndarray) -> np.ndarray:
+    arc = cumulative_arclength(points)
+    if len(arc) < 2 or arc[-1] <= 0.0:
+        raise ValueError("normalized arclength requires a nonzero polyline")
+    return arc / arc[-1]
 
 
 def polyline_length(points: np.ndarray) -> float:
@@ -67,3 +76,54 @@ def bounding_box(points: np.ndarray) -> tuple[float, float, float, float]:
         float(values[:, 0].max()),
         float(values[:, 1].max()),
     )
+
+
+@dataclass(frozen=True)
+class PolylineProjection:
+    point: np.ndarray
+    distance: np.ndarray
+    segment_index: np.ndarray
+    segment_t: np.ndarray
+    arc_length: np.ndarray
+
+
+def project_points_to_polyline(points: np.ndarray, polyline: np.ndarray) -> PolylineProjection:
+    queries = _points(points)
+    vertices = _points(polyline)
+    if len(vertices) < 2:
+        raise ValueError("polyline projection requires at least two vertices")
+
+    starts = vertices[:-1]
+    vectors = np.diff(vertices, axis=0)
+    squared_lengths = np.einsum("ij,ij->i", vectors, vectors)
+    offsets = queries[:, None, :] - starts[None, :, :]
+    numerators = np.einsum("mni,ni->mn", offsets, vectors)
+    parameters = np.divide(
+        numerators,
+        squared_lengths[None, :],
+        out=np.zeros_like(numerators),
+        where=squared_lengths[None, :] > 0.0,
+    )
+    parameters = np.clip(parameters, 0.0, 1.0)
+    candidates = starts[None, :, :] + parameters[:, :, None] * vectors[None, :, :]
+    squared_distances = np.sum((queries[:, None, :] - candidates) ** 2, axis=2)
+    segment_index = np.argmin(squared_distances, axis=1)
+    rows = np.arange(len(queries))
+    segment_t = parameters[rows, segment_index]
+    projected = candidates[rows, segment_index]
+    distance = np.sqrt(squared_distances[rows, segment_index])
+    cumulative = cumulative_arclength(vertices)
+    segment_lengths = np.sqrt(squared_lengths)
+    arc_length = cumulative[segment_index] + segment_t * segment_lengths[segment_index]
+    return PolylineProjection(projected, distance, segment_index, segment_t, arc_length)
+
+
+def distance_to_polyline(points: np.ndarray, polyline: np.ndarray) -> np.ndarray:
+    return project_points_to_polyline(points, polyline).distance
+
+
+def closest_point_on_polyline(point: np.ndarray, polyline: np.ndarray) -> np.ndarray:
+    query = np.asarray(point, dtype=float)
+    if query.shape != (2,):
+        raise ValueError("point must have shape (2,)")
+    return project_points_to_polyline(query[None, :], polyline).point[0]

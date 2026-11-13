@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from planarcurve.fitting.spline import SplineEndpointPolicy
 from planarcurve.spline import (
     BSplineCurve,
     bspline_from_geometry,
@@ -30,6 +31,15 @@ def test_spline_evaluation_endpoints_derivatives():
     assert result.curvature is not None
     assert np.isfinite(result.curvature).all()
 
+
+
+
+def test_evaluation_without_derivatives_returns_points_only():
+    parameters = np.array([0.0, 0.5, 1.0])
+    result = evaluate_bspline(geometry(), parameters, derivatives=False)
+    assert result.curvature is None
+    np.testing.assert_array_equal(result.tangent, np.zeros((3, 2)))
+    np.testing.assert_allclose(result.xy[[0, -1]], [[0.0, 0.0], [4.0, 0.0]])
 
 def test_cubic_simple_knot_has_c2_continuity():
     x_spline, y_spline = bspline_from_geometry(geometry())
@@ -76,3 +86,9 @@ def test_affine_semantics_match_inkgrammar_topology_transform():
 def test_spline_to_cubic_segments_reproduces_spans():
     segments = spline_to_cubic_segments(geometry(), tolerance=1e-10)
     assert len(segments) == 2
+
+
+
+def test_endpoint_policy_is_fitting_configuration_not_geometry():
+    policy = SplineEndpointPolicy(start="free", end="anchored")
+    assert (policy.start, policy.end) == ("free", "anchored")

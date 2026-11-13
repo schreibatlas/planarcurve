@@ -14,8 +14,9 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("planarcurve.svg requires FontTools; install planarcurve[svg]") from exc
 
+from .bezier import evaluate_cubic, evaluate_quadratic_bezier
 from .transforms import Affine2D
-from .types import Point2D
+from .types import CubicBezier, Point2D, QuadraticBezier
 
 
 @dataclass(frozen=True)
@@ -36,20 +37,16 @@ def _norm(vector: Point2D) -> Point2D | None:
         return None
     return vector[0] / length, vector[1] / length
 
-
-def _lerp(a: Point2D, b: Point2D, t: float) -> Point2D:
-    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
-
-
 def _quad(p0: Point2D, p1: Point2D, p2: Point2D, t: float) -> Point2D:
-    return _lerp(_lerp(p0, p1, t), _lerp(p1, p2, t), t)
+    curve = QuadraticBezier(p0, p1, p2)
+    point = evaluate_quadratic_bezier(curve, np.array([t]))[0]
+    return float(point[0]), float(point[1])
 
 
 def _cubic(p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D, t: float) -> Point2D:
-    a = _lerp(p0, p1, t)
-    b = _lerp(p1, p2, t)
-    c = _lerp(p2, p3, t)
-    return _lerp(_lerp(a, b, t), _lerp(b, c, t), t)
+    curve = CubicBezier(p0, p1, p2, p3)
+    point = evaluate_cubic(curve, np.array([t]))[0]
+    return float(point[0]), float(point[1])
 
 
 def _segment_length(points: Iterable[Point2D]) -> float:
@@ -65,13 +62,26 @@ def _record(path: str):
     return pen.value
 
 
+def _validate_samples_per_curve(samples_per_curve: int) -> int:
+    if (
+        isinstance(samples_per_curve, bool)
+        or not isinstance(samples_per_curve, (int, np.integer))
+        or samples_per_curve < 1
+    ):
+        raise ValueError("samples_per_curve must be an integer of at least one")
+    return int(samples_per_curve)
+
+
 def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
+    """Inspect a path; Bezier lengths are sampled approximations."""
+    samples_per_curve = _validate_samples_per_curve(samples_per_curve)
     operations = _record(path)
     move_count = sum(op == "moveTo" for op, _ in operations)
     closed = any(op == "closePath" for op, _ in operations)
     if move_count == 0:
         raise ValueError("path has no moveTo")
     current: Point2D | None = None
+    subpath_start: Point2D | None = None
     start: Point2D | None = None
     first_direction: Point2D | None = None
     last_direction: Point2D | None = None
@@ -80,11 +90,22 @@ def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
     for operator, args in operations:
         if operator == "moveTo":
             current = tuple(map(float, args[0]))
+            subpath_start = current
             if start is None:
                 start = current
             sampled.append(current)
-        elif operator in {"endPath", "closePath"}:
+        elif operator == "endPath":
             continue
+        elif operator == "closePath":
+            if current is None or subpath_start is None:
+                raise ValueError("closePath before moveTo")
+            direction = subpath_start[0] - current[0], subpath_start[1] - current[1]
+            if direction != (0.0, 0.0):
+                first_direction = first_direction or direction
+                last_direction = direction
+                length += hypot(*direction)
+                sampled.append(subpath_start)
+            current = subpath_start
         elif current is None:
             raise ValueError("drawing operation before moveTo")
         elif operator == "lineTo":
@@ -146,21 +167,32 @@ def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
 
 
 def sample_path(path: str, samples_per_curve: int = 24) -> list[Point2D]:
+    samples_per_curve = _validate_samples_per_curve(samples_per_curve)
     operations = _record(path)
     current: Point2D | None = None
+    subpath_start: Point2D | None = None
     sampled: list[Point2D] = []
     for operator, args in operations:
         if operator == "moveTo":
             current = tuple(map(float, args[0]))
+            subpath_start = current
             sampled.append(current)
-        elif operator in {"endPath", "closePath"}:
+        elif operator == "endPath":
             continue
+        elif operator == "closePath":
+            if current is None or subpath_start is None:
+                raise ValueError("closePath before moveTo")
+            if current != subpath_start:
+                sampled.append(subpath_start)
+            current = subpath_start
         elif current is None:
             raise ValueError("drawing operation before moveTo")
         elif operator == "lineTo":
             current = tuple(map(float, args[0]))
             sampled.append(current)
         elif operator == "curveTo":
+            if len(args) != 3:
+                raise ValueError("only ordinary cubic curves are supported")
             c1, c2, end = (tuple(map(float, point)) for point in args)
             points = [
                 _cubic(current, c1, c2, end, i / samples_per_curve)
@@ -169,6 +201,8 @@ def sample_path(path: str, samples_per_curve: int = 24) -> list[Point2D]:
             sampled.extend(points[1:])
             current = end
         elif operator == "qCurveTo":
+            if len(args) != 2 or args[-1] is None:
+                raise ValueError("only ordinary quadratic curves are supported")
             control, end = (tuple(map(float, point)) for point in args)
             points = [
                 _quad(current, control, end, i / samples_per_curve)
@@ -201,9 +235,13 @@ def transform_path(path: str, transform: Affine2D) -> str:
             points = [apply(tuple(map(float, point))) for point in args]
             chunks.append("C " + " ".join(fmt(point) for point in points))
         elif operator == "qCurveTo":
-            points = [apply(tuple(map(float, point))) for point in args if point is not None]
+            if len(args) != 2 or args[-1] is None:
+                raise ValueError("only ordinary quadratic curves are supported")
+            points = [apply(tuple(map(float, point))) for point in args]
             chunks.append("Q " + " ".join(fmt(point) for point in points))
-        elif operator in {"endPath", "closePath"}:
+        elif operator == "closePath":
+            chunks.append("Z")
+        elif operator == "endPath":
             continue
         else:
             raise ValueError(f"unsupported transform operation: {operator}")

@@ -5,7 +5,7 @@ SciPy is intentionally isolated to this optional module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from math import isfinite
 
 import numpy as np
@@ -17,7 +17,7 @@ except ImportError as exc:  # pragma: no cover - exercised in minimal installati
     raise ImportError("planarcurve.spline requires SciPy; install planarcurve[spline]") from exc
 
 from .transforms import Affine2D
-from .types import CubicSegment, Point2D, SplineEndpointPolicy
+from .types import CubicSegment, Point2D
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,6 @@ class BSplineCurve:
     knots: tuple[float, ...]
     control_points: tuple[Point2D, ...]
     degree: int = 3
-    endpoint_policy: SplineEndpointPolicy = field(default_factory=SplineEndpointPolicy)
 
     def __post_init__(self) -> None:
         knots = tuple(float(value) for value in self.knots)
@@ -127,15 +126,14 @@ def evaluate_bspline(
     parameters = _validate_parameters(u)
     x_spline, y_spline = bspline_from_geometry(geometry)
     xy = np.column_stack((x_spline(parameters), y_spline(parameters)))
-    first = np.column_stack((x_spline.derivative()(parameters), y_spline.derivative()(parameters)))
-    second = np.column_stack(
-        (x_spline.derivative(2)(parameters), y_spline.derivative(2)(parameters))
-    )
     transform = transform or Affine2D.identity()
     xy = transform.apply(xy)
     if not derivatives:
         return CurveEvaluation(parameters, xy, np.zeros_like(xy), None)
-    first = first @ transform.linear.T
+    first = np.column_stack((x_spline.derivative()(parameters), y_spline.derivative()(parameters)))
+    second = np.column_stack(
+        (x_spline.derivative(2)(parameters), y_spline.derivative(2)(parameters))
+    )
     second = second @ transform.linear.T
     speed = np.linalg.norm(first, axis=1)
     tangent = np.divide(

@@ -1,86 +1,64 @@
 # planarcurve
 
-`planarcurve` is a small numerical Python library for planar curves and trajectories.
-It is extracted from the generic geometry kernel in InkGrammar and intentionally has no
-handwriting, glyph, optimizer, Pydantic, or dataset concepts.
-
-## Status
-
-MVP / pre-release. The first public release is intended to be `0.1.0`.
-
-## Packaging
-
-The repository uses a **flat package layout** (no `src/` directory) and dynamic VCS
-versioning through `setuptools_scm`:
-
-```text
-planarcurve/
-├── planarcurve/
-│   ├── __init__.py
-│   ├── bezier.py
-│   ├── curvature.py
-│   ├── polyline.py
-│   ├── spline.py
-│   ├── svg.py
-│   ├── transforms.py
-│   └── types.py
-├── tests/
-└── pyproject.toml
-```
-
-A Git tag such as `v0.1.0` produces version `0.1.0`. Source trees without VCS metadata
-fall back to `0.1.0.dev0` for buildability.
+`planarcurve` provides numerical building blocks for planar curves and trajectories: polylines, Bezier curves, B-splines, normalized heading-rate trajectories, affine transforms, SVG paths, and fitting. Its core geometry API requires NumPy and does not depend on application-specific models.
 
 ## Install
 
 ```bash
-pip install planarcurve
+python -m pip install planarcurve
 ```
 
-Optional modules:
+Install optional features as needed:
 
 ```bash
-pip install "planarcurve[spline]"
-pip install "planarcurve[svg]"
+python -m pip install 'planarcurve[spline]'  # B-spline evaluation
+python -m pip install 'planarcurve[fit]'     # spline and trajectory fitting
+python -m pip install 'planarcurve[svg]'     # SVG path adapters
+python -m pip install 'planarcurve[all]'     # SciPy and FontTools
 ```
 
-For development:
+For development, install `planarcurve[dev]`.
 
-```bash
-pip install -e ".[dev]"
-pytest
-```
+## Quick start
 
-## Curvature trajectory
+Resample a polyline by arc length:
 
 ```python
-from planarcurve.curvature import (
-    CurvatureChange,
-    CurvatureProfile,
-    CurvatureTrajectory,
-)
+import numpy as np
+from planarcurve.polyline import polyline_length, resample_polyline_by_arclength
 
-trajectory = CurvatureTrajectory(
-    length=1.0,
-    start_angle_deg=25.0,
-    profile=CurvatureProfile(
-        interpolation="cubic-hermite",
-        start_rate_deg=40.0,
-        changes=(
-            CurvatureChange(0.25, 260.0),
-            CurvatureChange(0.55, 200.0),
-        ),
-        end_rate_deg=10.0,
-    ),
-)
-
-sample = trajectory.evaluate(count=257)
-print(sample.xy[-1], sample.end_pose.heading_deg)
+points = np.array([[0.0, 0.0], [1.0, 1.0], [3.0, 0.0]])
+uniform = resample_polyline_by_arclength(points, count=20)
+print(polyline_length(points), uniform.shape)
 ```
 
-The public angle contract is degrees, matching InkGrammar during extraction.
+Create and sample a normalized heading-rate trajectory:
 
-## B-spline
+```python
+from planarcurve.trajectory import (
+    HeadingRateChange,
+    HeadingRateProfile,
+    Trajectory2D,
+    trajectory_total_turn,
+)
+
+trajectory = Trajectory2D(
+    length=12.0,
+    start_heading_deg=15.0,
+    heading_rate=HeadingRateProfile(
+        start_rate_deg_per_u=0.0,
+        changes=(HeadingRateChange(0.5, 180.0),),
+        end_rate_deg_per_u=0.0,
+        interpolation="linear",
+    ),
+)
+sample = trajectory.evaluate(count=129)
+print(sample.xy[-1], trajectory_total_turn(trajectory))
+```
+
+`u` is normalized progress in `[0, 1]`. Heading-rate values are degrees per unit progress. Geometric curvature is signed inverse length and is exposed separately by `planarcurve.trajectory.curvature`; for a trajectory of length `L`, it equals `radians(heading_rate) / L`.
+
+B-spline operations require SciPy:
 
 ```python
 import numpy as np
@@ -90,19 +68,43 @@ curve = BSplineCurve(
     knots=(0, 0, 0, 0, 0.5, 1, 1, 1, 1),
     control_points=((0, 0), (1, 2), (2, 3), (3, 2), (4, 0)),
 )
-
-sample = curve.evaluate(np.linspace(0, 1, 64))
-uniform = curve.sample_by_arclength(64)
-segments = curve.to_cubic_segments()
+sample = curve.sample_by_arclength(64)
+path_segments = curve.to_cubic_segments(tolerance=1e-7)
 ```
 
-## Dependency boundary
+SVG path parsing and conversion require FontTools. Fitting APIs live in `planarcurve.fitting`; see `examples/fit_polyline_to_spline.py` and `examples/fit_shared_trajectory.py` for complete workflows.
 
-The core package requires NumPy only. `planarcurve.spline` requires SciPy and
-`planarcurve.svg` requires FontTools. The package does not import InkGrammar.
+## Concepts and numerical behavior
+
+- A trajectory's heading-rate profile is a function of normalized progress. Supported linear and cubic-Hermite profiles use an exact piecewise antiderivative for heading and total turn.
+- Trajectory positions integrate the heading-derived tangent numerically. Increasing the evaluation or integration resolution improves the position approximation.
+- Arc-length resampling approximates cumulative distance from sampled geometry. It is useful for uniform output spacing, but its accuracy depends on the sampling resolution.
+- `trajectory_to_cubic_path` adaptively subdivides a trajectory and checks the requested positional error at quarter, midpoint, and three-quarter samples of each piece. The tolerance is a sampled approximation criterion, not a formal continuous error bound.
+- `Affine2D` applies its linear transform and then translation. `Similarity2D` represents uniform scale, rotation, and translation.
+
+## Optional dependencies
+
+The package core imports with NumPy only. `planarcurve.spline` uses SciPy, as do the fitting modules. `planarcurve.svg` uses FontTools. Installing the core package does not import these optional modules.
+
+## API stability
+
+The package is pre-release and follows a `0.x` compatibility policy. Public names and numerical behavior may change between minor releases. See the API docstrings and focused tests for current contracts.
+
+## Examples
+
+Install all optional features and run the examples from a working directory of your choice:
+
+```bash
+python -m pip install 'planarcurve[all]'
+python examples/curvature_gallery.py
+python examples/spline_to_bezier.py
+python examples/svg_pipeline.py
+python examples/fit_polyline_to_spline.py
+python examples/fit_shared_trajectory.py
+```
+
+The gallery and fitting examples write SVG files to the current directory. See [examples/README.md](examples/README.md) for details.
 
 ## Provenance
 
-The initial numerical algorithms are extracted/adapted from InkGrammar's generic curve
-and trajectory code, preserving its numerical behavior while replacing application
-models with neutral frozen dataclasses. Licensed under Apache-2.0.
+The generic numerical geometry and fitting functionality was extracted and adapted from InkGrammar. `planarcurve` uses neutral geometry types and does not include handwriting, glyph, dataset, Pydantic, or application orchestration concepts. The project is licensed under Apache-2.0.

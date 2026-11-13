@@ -8,7 +8,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Affine2D:
-    """Full 2x2 affine linear map plus translation."""
+    """2D affine map with row-major linear coefficients and translation."""
 
     m00: float = 1.0
     m01: float = 0.0
@@ -26,6 +26,26 @@ class Affine2D:
         return cls()
 
     @classmethod
+    def translation_only(cls, dx: float = 0.0, dy: float = 0.0) -> Affine2D:
+        return cls(dx=dx, dy=dy)
+
+    @classmethod
+    def scale(cls, sx: float, sy: float | None = None) -> Affine2D:
+        return cls(m00=sx, m11=sx if sy is None else sy)
+
+    @classmethod
+    def rotation(cls, angle_deg: float) -> Affine2D:
+        angle = radians(angle_deg)
+        c, s = cos(angle), sin(angle)
+        return cls(c, -s, s, c)
+
+    @classmethod
+    def from_basis(
+        cls, origin: tuple[float, float], x_axis: tuple[float, float], y_axis: tuple[float, float]
+    ) -> Affine2D:
+        return cls(x_axis[0], y_axis[0], x_axis[1], y_axis[1], origin[0], origin[1])
+
+    @classmethod
     def from_scale_shear_translation(
         cls,
         *,
@@ -35,8 +55,7 @@ class Affine2D:
         dx: float = 0.0,
         dy: float = 0.0,
     ) -> Affine2D:
-        # Matches InkGrammar TopologyTransform semantics:
-        # x' = scale_x * (x + shear_x*y) + dx; y' = scale_y*y + dy.
+        """Build x'=scale_x*(x+shear_x*y)+dx, y'=scale_y*y+dy."""
         return cls(scale_x, scale_x * shear_x, 0.0, scale_y, dx, dy)
 
     @property
@@ -47,6 +66,10 @@ class Affine2D:
     def translation(self) -> np.ndarray:
         return np.array([self.dx, self.dy], dtype=float)
 
+    @property
+    def determinant(self) -> float:
+        return self.m00 * self.m11 - self.m01 * self.m10
+
     def as_tuple(self) -> tuple[float, float, float, float, float, float]:
         return self.m00, self.m01, self.m10, self.m11, self.dx, self.dy
 
@@ -55,6 +78,38 @@ class Affine2D:
         if values.shape[-1] != 2 or not np.isfinite(values).all():
             raise ValueError("points must contain finite 2-D coordinates")
         return values @ self.linear.T + self.translation
+
+    def apply_vectors(self, vectors: np.ndarray) -> np.ndarray:
+        values = np.asarray(vectors, dtype=float)
+        if values.shape[-1] != 2 or not np.isfinite(values).all():
+            raise ValueError("vectors must contain finite 2-D coordinates")
+        return values @ self.linear.T
+
+    def inverse(self) -> Affine2D:
+        determinant = self.determinant
+        if determinant == 0.0:
+            raise ValueError("singular affine transform has no inverse")
+        inverse_linear = np.array(
+            [[self.m11, -self.m01], [-self.m10, self.m00]], dtype=float
+        ) / determinant
+        inverse_translation = -(inverse_linear @ self.translation)
+        return Affine2D(
+            inverse_linear[0, 0],
+            inverse_linear[0, 1],
+            inverse_linear[1, 0],
+            inverse_linear[1, 1],
+            inverse_translation[0],
+            inverse_translation[1],
+        )
+
+    def compose(self, other: Affine2D) -> Affine2D:
+        """Return ``self ∘ other``: apply ``other`` first, then ``self``."""
+        linear = self.linear @ other.linear
+        translation = self.linear @ other.translation + self.translation
+        return Affine2D(
+            linear[0, 0], linear[0, 1], linear[1, 0], linear[1, 1],
+            translation[0], translation[1],
+        )
 
 
 @dataclass(frozen=True)

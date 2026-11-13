@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Literal, TypeAlias
+from typing import TypeAlias
 
 Point2D: TypeAlias = tuple[float, float]
 
@@ -29,6 +29,28 @@ class CubicSegment:
 
 
 @dataclass(frozen=True)
+class CubicPath:
+    """A cubic chain with an explicit starting point."""
+
+    start: Point2D
+    segments: tuple[CubicSegment, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "start", _finite_point(self.start, name="start"))
+        object.__setattr__(self, "segments", tuple(self.segments))
+        if not all(isinstance(segment, CubicSegment) for segment in self.segments):
+            raise TypeError("segments must contain CubicSegment values")
+
+    def to_beziers(self) -> tuple[CubicBezier, ...]:
+        point = self.start
+        beziers = []
+        for segment in self.segments:
+            beziers.append(CubicBezier(point, segment.c1, segment.c2, segment.end))
+            point = segment.end
+        return tuple(beziers)
+
+
+@dataclass(frozen=True)
 class CubicBezier:
     p0: Point2D
     p1: Point2D
@@ -40,12 +62,14 @@ class CubicBezier:
             object.__setattr__(self, name, _finite_point(getattr(self, name), name=name))
 
 
+
+
 @dataclass(frozen=True)
-class SplineEndpointPolicy:
-    start: Literal["locked", "free", "anchored"] = "locked"
-    end: Literal["locked", "free", "anchored"] = "locked"
+class QuadraticBezier:
+    p0: Point2D
+    p1: Point2D
+    p2: Point2D
 
     def __post_init__(self) -> None:
-        allowed = {"locked", "free", "anchored"}
-        if self.start not in allowed or self.end not in allowed:
-            raise ValueError("endpoint policy must be locked, free, or anchored")
+        for name in ("p0", "p1", "p2"):
+            object.__setattr__(self, name, _finite_point(getattr(self, name), name=name))
