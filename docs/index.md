@@ -37,7 +37,7 @@ print(f"length: {length:.3f}")
 print(resampled)
 ```
 
-Start with the [quickstart](quickstart.md), then choose from [concepts](concepts/index.md), [guides](guides/index.md), [examples](examples.md), or the [API reference](api/index.md). See [installation](installation.md) for optional dependencies and [development](development.md) for local checks.
+Start with the [quickstart](quickstart.md), then choose from [concepts](concepts/index.md), [guides](guides/index.md), [examples](examples.md), or the [API reference](api/index.md). See [installation](installation.md) for optional dependencies and [development](development.md) for local checks. Read the [changelog](changelogs.md) for release history.
 
 :::{admonition} Pre-release status
 :class: warning
@@ -56,4 +56,5 @@ guides/index
 examples
 api/index
 development
+changelogs
 ```

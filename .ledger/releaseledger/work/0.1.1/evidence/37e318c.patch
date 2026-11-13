@@ -1,0 +1,2126 @@
+ .github/workflows/ci.yml                    |  14 ++++
+ .readthedocs.yaml                           |  27 +++++++
+ README.md                                   |  46 +++--------
+ docs/Makefile                               |  32 ++++++++
+ docs/api/bezier.md                          |  10 +++
+ docs/api/fitting.md                         |  39 ++++++++++
+ docs/api/index.md                           |  30 ++++++++
+ docs/api/polyline.md                        |  10 +++
+ docs/api/spline.md                          |  10 +++
+ docs/api/svg.md                             |  10 +++
+ docs/api/trajectory.md                      |  10 +++
+ docs/api/transforms.md                      |  10 +++
+ docs/api/types.md                           |  10 +++
+ docs/concepts/coordinates-and-parameters.md |  52 +++++++++++++
+ docs/concepts/index.md                      |  12 +++
+ docs/concepts/numerical-contracts.md        |  39 ++++++++++
+ docs/concepts/splines.md                    |  28 +++++++
+ docs/concepts/trajectories.md               |  37 +++++++++
+ docs/conf.py                                |  91 ++++++++++++++++++++++
+ docs/development.md                         |  37 +++++++++
+ docs/examples.md                            |  25 ++++++
+ docs/guides/bezier.md                       |  42 +++++++++++
+ docs/guides/fitting.md                      |  85 +++++++++++++++++++++
+ docs/guides/index.md                        |  15 ++++
+ docs/guides/polylines.md                    |  71 +++++++++++++++++
+ docs/guides/splines.md                      |  46 +++++++++++
+ docs/guides/svg.md                          |  44 +++++++++++
+ docs/guides/trajectories.md                 |  57 ++++++++++++++
+ docs/guides/transforms.md                   |  48 ++++++++++++
+ docs/index.md                               |  59 +++++++++++++++
+ docs/installation.md                        |  26 +++++++
+ docs/make.bat                               | 113 ++++++++++++++++++++++++++++
+ docs/make.py                                |  81 ++++++++++++++++++++
+ docs/quickstart.md                          |  66 ++++++++++++++++
+ docs/requirements.txt                       |   4 +
+ planarcurve/fitting/spline.py               |  34 ++++++++-
+ planarcurve/fitting/trajectory.py           |  56 +++++++++++++-
+ planarcurve/polyline.py                     |  42 ++++++++++-
+ planarcurve/spline.py                       |  35 ++++++++-
+ planarcurve/svg.py                          |  31 ++++++--
+ planarcurve/trajectory.py                   | 104 +++++++++++++++++++++++--
+ planarcurve/transforms.py                   |  14 +++-
+ planarcurve/types.py                        |   8 +-
+ 43 files changed, 1597 insertions(+), 63 deletions(-)
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index b351404..e558333 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -62,3 +62,17 @@ jobs:
+           assert trajectory_total_turn(Trajectory2D(1.0, 0.0,
+           HeadingRateProfile(90.0, 90.0, interpolation="linear"))) == 90.0;
+           assert "scipy" not in sys.modules and "fontTools" not in sys.modules'
++
++
++  docs:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.13"
++      - run: python -m pip install -e ".[all]"
++      - run: python -m pip install -r docs/requirements.txt
++      - run: python -m sphinx -W --keep-going -b html docs docs/_build/html
+diff --git a/.readthedocs.yaml b/.readthedocs.yaml
+new file mode 100644
+index 0000000..77b4b3b
+--- /dev/null
++++ b/.readthedocs.yaml
+@@ -0,0 +1,27 @@
++# Read the Docs configuration file
++# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
++
++# Required
++version: 2
++
++# Set the OS, Python version, and other tools you might need
++build:
++  os: ubuntu-24.04
++  tools:
++    python: "3.13"
++
++# Build documentation in the "docs/" directory with Sphinx
++sphinx:
++  configuration: docs/conf.py
++  fail_on_warning: true
++
++# Optionally, but recommended,
++# declare the Python requirements required to build your documentation
++# See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
++python:
++  install:
++    - requirements: docs/requirements.txt
++    - method: pip
++      path: .
++      extra_requirements:
++        - all
+diff --git a/README.md b/README.md
+index e6dc343..0445ef4 100644
+--- a/README.md
++++ b/README.md
+@@ -2,6 +2,7 @@
+
+ `planarcurve` provides numerical building blocks for planar polylines, Bezier curves, cubic B-splines, normalized heading-rate trajectories, transforms, fitting, and SVG paths. Core geometry uses NumPy and remains independent of application-specific models.
+
++**Documentation:** [Guides, concepts, and API reference](https://planarcurve.readthedocs.io/en/latest/).
+ ## Install
+
+ ```bash
+@@ -70,49 +71,24 @@ print(sample.xy[-1], trajectory_total_turn(trajectory))
+
+ Here `u` is normalized progress in `[0, 1]`. Heading rates are degrees per unit progress. Geometric curvature is signed inverse length and equals `radians(heading_rate) / trajectory.length`.
+
++## Fitting
+ ## Fitting
+
+-Trajectory fitting uses a unit-length, zero-heading canonical profile and a separate similarity transform for each occurrence. Position residuals are divided by the observed occurrence's length. Heading, total-turn, and smoothness residuals are scaled by their configured angular or rate sigmas, then multiplied by dimensionless weights. Reported position error metrics use the input coordinate units.
+-
+-```python
+-import numpy as np
+-from planarcurve.fitting.trajectory import TrajectoryFitOptions, fit_trajectory
+-
+-points = np.array([[0, 0], [1, 0], [2, 1], [3, 2], [4, 2]], dtype=float)
+-fit = fit_trajectory(points, TrajectoryFitOptions(change_count=1, samples=48, restarts=0))
+-assert fit.success
+-print(fit.metrics)
+-```
+-
+-Spline fitting uses sparse weighted least squares with iteratively reweighted residuals. `SplineEndpointPolicy` defaults to free endpoints. Choose locked or anchored endpoints explicitly when a fit requires them.
+-
++Fitting requires SciPy. Spline fitting estimates shared control points with weighted sparse least squares and IRLS. Trajectory fitting uses a normalized length-1, zero-heading profile plus a similarity transform for each occurrence. See the [fitting guide](https://planarcurve.readthedocs.io/en/latest/guides/fitting.html) for residual units, endpoint policies, options, and metrics.
+ ## Supported spline geometry
+
+-`BSplineCurve` supports cubic B-splines only. For `n` control points, the knot vector must contain `n + 4` finite values, start with four zeros, end with four ones, and have strictly increasing interior values in `(0, 1)`. At least four finite 2D control points are required. Spline evaluation, derivatives, and conversion require SciPy.
+-
+-`HeadingRateProfile(interpolation="cubic-hermite")` computes shape-preserving Hermite slopes from its rate knots. Callers provide knot positions and rates, not derivative values. The `linear` option uses piecewise-linear rates.
+-
++`BSplineCurve` intentionally supports clamped cubic geometry with simple interior knots, not arbitrary SciPy spline configurations. The `cubic-hermite` heading-rate mode computes shape-preserving slopes from rate knots; callers do not supply derivative values. See [spline concepts](https://planarcurve.readthedocs.io/en/latest/concepts/splines.html) for the full contract.
+ ## Numerical contracts
+
+ | Operation | Contract |
+ | --- | --- |
+-| Heading and total-turn evaluation | Exact piecewise antiderivative of the selected heading-rate interpolation. |
+-| Theoretical trajectory arc length | Exactly `length * u`; returned sample arc lengths do not depend on the position integrator. |
+-| Trajectory positions | Adaptive numerical integration of the heading-derived unit tangent. Accuracy is controlled by integration tolerances and depth. |
+-| Polyline length and resampling | Exact for the supplied piecewise-linear polyline, up to floating-point arithmetic. |
+-| Bezier evaluation, derivatives, tangent, and curvature | Analytic evaluation, up to floating-point arithmetic. |
+-| Bezier flattening and length | Adaptive numerical approximations controlled by tolerance and maximum depth. |
+-| B-spline evaluation and derivatives | Analytic spline evaluation through SciPy. Arc-length sampling uses a dense sampled approximation. |
+-| Trajectory-to-cubic conversion | Adaptive pieces are checked at quarter, midpoint, and three-quarter parameters. The tolerance is a sampled criterion, not a formal continuous error bound. |
+-| SVG Bezier lengths and endpoint tangents | Sampled approximations controlled by `samples_per_curve`. |
+-
+-Function inputs that accept arrays use NumPy array-like values; public numerical outputs use float arrays. Point values must contain exactly two finite coordinates.
+-
+-Polyline projection compares every query point with every segment. Its current time and temporary memory costs are `O(M*N)` for `M` queries and `N` segments.
+-
+-`sample_path()` accepts exactly one SVG subpath. For multiple subpaths, use `sample_subpaths()` to receive separate arrays without artificial connecting segments. `PathInfo.closed` is true only when all subpaths are closed; `subpath_closed` reports each status. Its start and start tangent refer to the first subpath, and its end and end tangent refer to the last.
++| Heading and theoretical trajectory arc length | Piecewise heading integration is analytic; arc length is exactly `length * u`. |
++| Trajectory positions and trajectory-to-cubic conversion | Adaptive numerical integration and sampled error checks, not a continuous global bound. |
++| Polyline length and Bezier evaluation/derivatives | Exact for the supplied geometry, up to floating-point arithmetic. |
++| Bezier flattening/length and B-spline arc-length sampling | Adaptive or dense-sample approximations. |
++| SVG curve lengths and endpoint tangents | Sampled approximations controlled by `samples_per_curve`. |
+
+-NumPy arrays stored in frozen result dataclasses remain writable. Frozen dataclasses prevent field reassignment, not mutation of the arrays they contain.
++Public points are finite 2D coordinates. Polyline projection compares every query with every segment, using `O(M*N)` time and temporary memory. SVG `sample_path()` accepts one subpath; use `sample_subpaths()` to preserve multiple subpaths without artificial connectors. Frozen result dataclasses do not make embedded NumPy arrays immutable.
+
+ ## Optional dependencies and examples
+
+@@ -130,7 +106,7 @@ python examples/fit_polyline_to_spline.py
+ python examples/fit_shared_trajectory.py
+ ```
+
+-The synthetic, Matplotlib-free examples are documented in the [examples guide](https://github.com/schreibatlas/planarcurve/blob/main/examples/README.md). The [trajectory gallery](https://github.com/schreibatlas/planarcurve/blob/main/examples/trajectory_gallery.py), [Bezier basics](https://github.com/schreibatlas/planarcurve/blob/main/examples/bezier_basics.py), [spline conversion](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py), [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py), [spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py), and [shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) scripts write SVG output where applicable.
++See the [examples guide](https://planarcurve.readthedocs.io/en/latest/examples.html) for all six scripts, their optional dependencies, and generated output.
+
+ ## API stability and provenance
+
+diff --git a/docs/Makefile b/docs/Makefile
+new file mode 100644
+index 0000000..3ff8019
+--- /dev/null
++++ b/docs/Makefile
+@@ -0,0 +1,32 @@
++# Makefile for Sphinx documentation
++
++# You can set these variables from the command line
++SPHINXOPTS    ?=
++SPHINXBUILD   ?= sphinx-build
++SOURCEDIR     = .
++BUILDDIR      = _build
++
++# Put it first so that "make" without argument is like "make help".
++help:
++	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
++
++.PHONY: help Makefile clean html livehtml
++
++# Clean build directory
++clean:
++	rm -rf $(BUILDDIR)/*
++
++# Build HTML documentation
++html:
++	@$(SPHINXBUILD) -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
++	@echo
++	@echo "Build finished. The HTML pages are in $(BUILDDIR)/html."
++
++# Live reload server (requires sphinx-autobuild)
++livehtml:
++	sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)/html" $(SPHINXOPTS) $(O)
++
++# Catch-all target: route all unknown targets to Sphinx using the new
++# "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
++%: Makefile
++	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+diff --git a/docs/api/bezier.md b/docs/api/bezier.md
+new file mode 100644
+index 0000000..d914907
+--- /dev/null
++++ b/docs/api/bezier.md
+@@ -0,0 +1,10 @@
++# `planarcurve.bezier`
++
++Analytic Bezier evaluation and differential geometry, plus adaptive subdivision, flattening, and length approximation. Bezier data types are in [`planarcurve.types`](types.md).
++
++```{automodule} planarcurve.bezier
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/fitting.md b/docs/api/fitting.md
+new file mode 100644
+index 0000000..d9c4a21
+--- /dev/null
++++ b/docs/api/fitting.md
+@@ -0,0 +1,39 @@
++# `planarcurve.fitting`
++
++Optional fitting utilities require SciPy. Install with `python -m pip install 'planarcurve[fit]'`.
++
++## Endpoint policy
++
++```{automodule} planarcurve.fitting.policy
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
++
++## Optimization parameterization utilities
++
++```{automodule} planarcurve.fitting.parameters
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
++
++## Spline fitting
++
++```{automodule} planarcurve.fitting.spline
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
++
++## Trajectory fitting
++
++```{automodule} planarcurve.fitting.trajectory
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/index.md b/docs/api/index.md
+new file mode 100644
+index 0000000..51105f6
+--- /dev/null
++++ b/docs/api/index.md
+@@ -0,0 +1,30 @@
++# API reference
++
++The reference is grouped by capability. Core modules require NumPy. Optional modules list their installation extra on the corresponding page.
++
++## Core
++
++```{toctree}
++:maxdepth: 1
++
++types
++polyline
++bezier
++trajectory
++transforms
++```
++
++## Optional integrations
++
++- [B-splines](spline.md), install `planarcurve[spline]`.
++- [Fitting](fitting.md), install `planarcurve[fit]`.
++- [SVG](svg.md), install `planarcurve[svg]`.
++
++```{toctree}
++:maxdepth: 1
++:hidden:
++
++spline
++fitting
++svg
++```
+diff --git a/docs/api/polyline.md b/docs/api/polyline.md
+new file mode 100644
+index 0000000..1f21449
+--- /dev/null
++++ b/docs/api/polyline.md
+@@ -0,0 +1,10 @@
++# `planarcurve.polyline`
++
++Polyline measurement, resampling, projection, and scoring.
++
++```{automodule} planarcurve.polyline
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/spline.md b/docs/api/spline.md
+new file mode 100644
+index 0000000..650286c
+--- /dev/null
++++ b/docs/api/spline.md
+@@ -0,0 +1,10 @@
++# `planarcurve.spline`
++
++Optional cubic B-spline evaluation and conversion to cubic Bezier paths. Install with `python -m pip install 'planarcurve[spline]'`.
++
++```{automodule} planarcurve.spline
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/svg.md b/docs/api/svg.md
+new file mode 100644
+index 0000000..c8e932f
+--- /dev/null
++++ b/docs/api/svg.md
+@@ -0,0 +1,10 @@
++# `planarcurve.svg`
++
++Optional FontTools-backed SVG path analysis, sampling, and coordinate transforms. Install with `python -m pip install 'planarcurve[svg]'`.
++
++```{automodule} planarcurve.svg
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/trajectory.md b/docs/api/trajectory.md
+new file mode 100644
+index 0000000..e2f6277
+--- /dev/null
++++ b/docs/api/trajectory.md
+@@ -0,0 +1,10 @@
++# `planarcurve.trajectory`
++
++Normalized-progress heading-rate trajectories, sampling, integration, endpoint poses, and cubic-path approximation.
++
++```{automodule} planarcurve.trajectory
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/transforms.md b/docs/api/transforms.md
+new file mode 100644
+index 0000000..3a32eb2
+--- /dev/null
++++ b/docs/api/transforms.md
+@@ -0,0 +1,10 @@
++# `planarcurve.transforms`
++
++Two-dimensional affine and positive-scale similarity transforms.
++
++```{automodule} planarcurve.transforms
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/types.md b/docs/api/types.md
+new file mode 100644
+index 0000000..ab47129
+--- /dev/null
++++ b/docs/api/types.md
+@@ -0,0 +1,10 @@
++# `planarcurve.types`
++
++Core point and curve value types. See the [Bezier API](bezier.md) for operations on the Bezier types and the [trajectory API](trajectory.md) for cubic conversion.
++
++```{automodule} planarcurve.types
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/concepts/coordinates-and-parameters.md b/docs/concepts/coordinates-and-parameters.md
+new file mode 100644
+index 0000000..378f888
+--- /dev/null
++++ b/docs/concepts/coordinates-and-parameters.md
+@@ -0,0 +1,52 @@
++# Coordinates and parameters
++
++## Points
++
++The public geometry is explicitly two-dimensional. A point-like value must contain exactly two finite coordinates. Functions accepting a collection of points generally use an `(N, 2)` array. Numerical array results are floating-point NumPy arrays.
++
++Count, order, and recursion-depth arguments require integer values. Floating-point lookalikes and booleans are rejected rather than silently converted.
++
++## Different parameter meanings
++
++Several APIs use parameters in `[0, 1]`, but they do not all represent the same thing.
++
++### Bezier parameter `t`
++
++For a quadratic or cubic Bezier, `t ∈ [0, 1]` is the polynomial curve parameter. Equal increments of `t` generally do not correspond to equal distances along the curve.
++
++### B-spline parameter `u`
++
++A supported `BSplineCurve` uses the clamped interval `u ∈ [0, 1]`. `evaluate(u)` evaluates at those parameter values. `sample_by_arclength()` instead approximates uniform geometric spacing using a dense parameter sample and interpolation.
++
++### Trajectory progress `u`
++
++For `Trajectory2D`, `u ∈ [0, 1]` means normalized progress. Speed with respect to `u` is constant and equals the trajectory's geometric `length`. Therefore its theoretical arc length is
++
++```text
++s(u) = length * u
++```
++
++The heading-rate profile `q(u)` is measured in degrees per unit `u`, not degrees per coordinate unit. Signed geometric curvature is
++
++```text
++κ(u) = radians(q(u)) / length
++```
++
++For example, doubling `length` while keeping the same profile halves the curvature while preserving the profile's heading change.
++
++## Transform convention
++
++`Affine2D` stores a row-major 2×2 linear map and a translation:
++
++```text
++[x']   [m00 m01] [x]   [dx]
++[y'] = [m10 m11] [y] + [dy]
++```
++
++`apply()` transforms points. `apply_vectors()` applies only the linear component, without translation. Composition is ordered as function composition:
++
++```python
++a.compose(b)  # a ∘ b: apply b first, then a
++```
++
++A singular affine map can transform points but has no inverse. `Similarity2D` is restricted to positive uniform scale, rotation in degrees, and translation.
+diff --git a/docs/concepts/index.md b/docs/concepts/index.md
+new file mode 100644
+index 0000000..68c8d41
+--- /dev/null
++++ b/docs/concepts/index.md
+@@ -0,0 +1,12 @@
++# Concepts
++
++These pages explain the numerical model and conventions shared across the API.
++
++```{toctree}
++:maxdepth: 1
++
++coordinates-and-parameters
++trajectories
++splines
++numerical-contracts
++```
+diff --git a/docs/concepts/numerical-contracts.md b/docs/concepts/numerical-contracts.md
+new file mode 100644
+index 0000000..5156d91
+--- /dev/null
++++ b/docs/concepts/numerical-contracts.md
+@@ -0,0 +1,39 @@
++# Numerical contracts
++
++The API distinguishes analytic geometry from operations that deliberately approximate a continuous curve.
++
++## Exact or analytic operations
++
++| Operation | Contract |
++| --- | --- |
++| Polyline length and cumulative arc length | Sum of supplied segment chord lengths, up to floating-point arithmetic. |
++| Bezier evaluation, derivatives, tangent, and curvature | Analytic formulas evaluated in floating-point arithmetic. |
++| Heading-rate interpolation and its piecewise antiderivative | Analytic for the selected linear or internally shape-preserving cubic-Hermite profile. |
++| Theoretical trajectory arc length | Exactly `length * u`, up to floating-point arithmetic, independent of the position integrator. |
++| B-spline evaluation and derivatives | Spline evaluation through SciPy; arc-length sampling remains an approximation. |
++
++## Numerical approximations
++
++| Operation | Approximation |
++| --- | --- |
++| Trajectory positions | Adaptive numerical integration of the heading-derived tangent. |
++| Bezier flattening | Adaptive subdivision using control-point distances from the endpoint chord as a flatness test. |
++| Bezier length | Adaptive approximation using chord and control-polygon length estimates. |
++| B-spline arc-length sampling | Dense parameter sampling, cumulative chord lengths, and interpolation. |
++| Trajectory-to-cubic conversion | Adaptive subdivision with error checks at quarter, midpoint, and three-quarter parameters. This is not a global continuous error proof. |
++| SVG curve length and endpoint tangent estimates | Sampled according to `samples_per_curve`. |
++
++## Degenerate geometry
++
++- A zero-length polyline cannot be normalized by arc length or resampled.
++- Bezier and spline tangent normalization returns zero vectors where the derivative is degenerate; their curvature routines likewise return zero when speed is too small for the curvature formula.
++- Polyline projection tolerates duplicate vertices and zero-length segments.
++- A singular `Affine2D` can be applied, but `inverse()` raises because no inverse exists.
++
++## Projection complexity
++
++`project_points_to_polyline()` compares every query with every segment. With `M` query points and `N` segments, the current implementation takes `O(M*N)` time and uses `O(M*N)` temporary memory. Large query/segment combinations can therefore be expensive.
++
++## Mutability
++
++Frozen dataclasses prevent reassignment of their fields. They do not recursively make embedded NumPy arrays immutable; arrays stored in result objects remain writable.
+diff --git a/docs/concepts/splines.md b/docs/concepts/splines.md
+new file mode 100644
+index 0000000..06197c8
+--- /dev/null
++++ b/docs/concepts/splines.md
+@@ -0,0 +1,28 @@
++# Supported B-splines
++
++`BSplineCurve` intentionally supports a narrow, predictable subset of B-spline geometry that can be converted to cubic Bezier spans. It is not a general wrapper for every SciPy `BSpline` configuration.
++
++A valid curve has:
++
++- degree exactly 3;
++- at least four finite 2D control points;
++- exactly `n_control_points + 4` knots;
++- four leading zero knots and four trailing one knots;
++- finite, nondecreasing knot values;
++- simple, strictly increasing interior knots in `(0, 1)`.
++
++Spline functionality is optional and requires SciPy. Install it with `python -m pip install 'planarcurve[spline]'`.
++
++## Evaluation and differential geometry
++
++`evaluate()` and `evaluate_bspline()` evaluate positions at normalized parameters `u ∈ [0, 1]`. Derivatives can be requested, and the result can include unit tangents and signed geometric curvature. An optional `Affine2D` is applied to positions and to the linear part of the derivatives, so tangent and curvature describe the transformed curve.
++
++Set `derivatives=False` when only positions are needed. `CurveEvaluation` then returns `None` for tangent and curvature.
++
++## Arc-length sampling
++
++`sample_by_arclength()` approximates equal geometric spacing. It evaluates a dense parameter grid of `max(1024, count * 32)` points, accumulates chord lengths, interpolates target arc lengths back to parameter values, then evaluates the spline at those values. This is an approximation, not exact inversion of the spline's arc-length function. When supplied, the transform is included in the sampling distance.
++
++## Cubic-path conversion
++
++`spline_to_cubic_segments()` inserts interior knots as needed and represents each nonzero knot span as a cubic Bezier segment. It verifies the result at 33 uniformly spaced local parameter values per span against the requested tolerance. `to_cubic_path()` additionally stores the explicit start point in a `CubicPath`.
+diff --git a/docs/concepts/trajectories.md b/docs/concepts/trajectories.md
+new file mode 100644
+index 0000000..faf9e17
+--- /dev/null
++++ b/docs/concepts/trajectories.md
+@@ -0,0 +1,37 @@
++# Trajectories
++
++A `Trajectory2D` describes a planar curve by its geometric length, starting heading, and a profile of heading rate over normalized progress. This separates shape from scale: the profile controls how direction changes, while `length` controls geometric scale.
++
++## Heading-rate profile
++
++`HeadingRateProfile` consists of a start heading rate, zero or more interior `HeadingRateChange` knots, and an end heading rate. Each interior knot has a strictly interior position `at ∈ (0, 1)` and a finite rate. Knot positions must be strictly ordered. Rates are in degrees per unit normalized progress, written `deg/u`.
++
++The interpolation mode is either `"linear"` or `"cubic-hermite"`. The latter computes shape-preserving slopes internally from the knot positions and rates. Callers supply no derivative values; this is not a general Hermite spline with user-selected slopes.
++
++## From profile to positions
++
++The evaluation chain is:
++
++```text
++heading rate dθ/du
++        ↓ exact piecewise antiderivative
++heading θ(u)
++        ↓ cos/sin
++unit tangent
++        ↓ adaptive numerical integration
++position xy(u)
++```
++
++Heading integration is analytic for the selected piecewise interpolation, up to floating-point arithmetic. Position is obtained by numerically integrating the heading-derived tangent. With geometric length `L`, the position derivative with respect to `u` is `L` times the unit tangent, so theoretical arc length is exactly `L*u`. It is independent of position-integration error and tolerance.
++
++A trajectory's starting position is `(0, 0)`. Apply `Affine2D` or `Similarity2D` to place or orient it in a scene. `trajectory_total_turn()` returns the signed total heading change in degrees.
++
++## Samples and endpoints
++
++`evaluate_trajectory(trajectory, count=...)` samples uniformly in `u`, including 0 and 1. Each `TrajectorySample` includes progress, positions, heading, heading rate, unit tangent, theoretical arc length, and an end pose. Position fields are numerically integrated; the arc-length field follows the exact `length*u` contract.
++
++Use `evaluate_trajectory_at()` for arbitrary `u` values or `sample_trajectory_by_arclength()` for equal intervals in theoretical arc length. Since normalized trajectory speed is constant, uniform `u` and uniform theoretical arc length correspond.
++
++## Conversion to cubic Beziers
++
++`trajectory_to_cubic_path()` adaptively subdivides profile intervals. It compares the cubic approximation with the numerically evaluated trajectory at the quarter, midpoint, and three-quarter parameters. `max_error` is therefore a sampled acceptance criterion, not a proof of a continuous global Hausdorff error bound.
+diff --git a/docs/conf.py b/docs/conf.py
+new file mode 100644
+index 0000000..a942b8e
+--- /dev/null
++++ b/docs/conf.py
+@@ -0,0 +1,91 @@
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++# https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
++
++project = "planarcurve"
++copyright = "2026, Holger Nahrstaedt"
++author = "Holger Nahrstaedt"
++
++# -- General configuration ---------------------------------------------------
++
++# Add any Sphinx extension module names here, as strings. They can be
++# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
++# ones.
++extensions = [
++    "sphinx.ext.autodoc",
++    "sphinx.ext.doctest",
++    "sphinx.ext.intersphinx",
++    "sphinx.ext.napoleon",
++    "sphinx.ext.viewcode",
++    "myst_parser",
++]
++
++# All authored Sphinx pages are MyST Markdown.
++source_suffix = {
++    ".md": "markdown",
++}
++
++# Required for readable Markdown-native admonitions.
++myst_enable_extensions = ["colon_fence"]
++
++# Current documentation contains headings through H4.
++myst_heading_anchors = 4
++
++# Napoleon settings for NumPy-style docstrings
++napoleon_google_docstring = False
++napoleon_numpy_docstring = True
++napoleon_include_init_with_doc = True
++napoleon_include_private_with_doc = False
++napoleon_include_special_with_doc = True
++napoleon_use_admonition_for_examples = False
++napoleon_use_admonition_for_notes = False
++napoleon_use_admonition_for_references = False
++napoleon_use_ivar = False
++napoleon_use_param = True
++napoleon_use_rtype = True
++napoleon_preprocess_types = False
++napoleon_type_aliases = None
++napoleon_attr_annotations = True
++
++# Autodoc settings
++autodoc_member_order = "bysource"
++autodoc_typehints = "description"
++autoclass_content = "class"
++
++# Add any paths that contain templates here, relative to this directory.
++templates_path = ["_templates"]
++
++# List of patterns, relative to source directory, that match files and
++# directories to ignore when looking for source files.
++# This pattern also affects html_static_path and html_extra_path.
++exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
++
++
++# -- Options for HTML output -------------------------------------------------
++
++# The theme to use for HTML and HTML Help pages.  See the documentation for
++# a list of builtin themes.
++#
++# html_theme = 'furo'
++
++html_theme = "sphinx_rtd_theme"
++
++html_theme_options = {
++    "navigation_depth": 4,
++    "titles_only": False,
++}
++
++# Add any paths that contain custom static files (such as style sheets) here,
++# relative to this directory. They are copied after the builtin static files,
++# so a file named "default.css" will overwrite the builtin "default.css".
++# html_static_path = ['_static']
++
++# Set up intersphinx maps
++intersphinx_mapping = {
++    "python": ("https://docs.python.org/3", None),
++    "numpy": ("https://numpy.org/doc/stable", None),
++    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
++}
+diff --git a/docs/development.md b/docs/development.md
+new file mode 100644
+index 0000000..a0bfd88
+--- /dev/null
++++ b/docs/development.md
+@@ -0,0 +1,37 @@
++# Development
++
++## Set up
++
++From the repository root, install the development tools and optional integrations:
++
++```bash
++python -m pip install -e '.[dev]'
++python -m pip install -e '.[all]'
++python -m pip install -r docs/requirements.txt
++```
++
++The first install provides pytest, Ruff, and build tooling. The `all` extra adds SciPy and FontTools for testing optional modules and building their API reference.
++
++## Checks
++
++Run the test suite and style checks:
++
++```bash
++python -m pytest
++ruff check .
++ruff format --check .
++```
++
++Build the documentation with warnings treated as errors. This is the canonical documentation check used in CI:
++
++```bash
++python -m sphinx -W --keep-going -b html docs docs/_build/html
++```
++
++The helper is also available:
++
++```bash
++python docs/make.py html
++```
++
++For optional, network-dependent link checking, run `python -m sphinx -b linkcheck docs docs/_build/linkcheck`. Do not treat external link availability as a deterministic pull-request check.
+diff --git a/docs/examples.md b/docs/examples.md
+new file mode 100644
+index 0000000..062eeb6
+--- /dev/null
++++ b/docs/examples.md
+@@ -0,0 +1,25 @@
++# Examples
++
++The repository includes six synthetic, standalone demonstrations. They do not require Matplotlib, application-specific models, or local datasets. Install optional integrations once with `python -m pip install '.[all]'`, then run scripts from the repository root.
++
++| Script | Demonstrates | Extra | Output |
++| --- | --- | --- | --- |
++| [`trajectory_gallery.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/trajectory_gallery.py) | Straight, arc, and changing heading-rate profiles | None | `trajectory_gallery.svg` |
++| [`bezier_basics.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/bezier_basics.py) | Evaluation, tangents, curvature, subdivision, flattening, and length | None | Console |
++| [`spline_to_bezier.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py) | Arc-length sampling and spline-to-cubic conversion | `spline` | Console |
++| [`svg_pipeline.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py) | SVG analysis, transform, sampling, and resampling | `svg` | Console |
++| [`fit_polyline_to_spline.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) | Robust fitting of shared spline control points | `fit` | `fit_polyline_to_spline.svg` |
++| [`fit_shared_trajectory.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) | One normalized profile fitted to transformed occurrences | `fit` | `fit_shared_trajectory.svg` |
++
++Run one example or all of them:
++
++```bash
++python examples/trajectory_gallery.py
++python examples/bezier_basics.py
++python examples/spline_to_bezier.py
++python examples/svg_pipeline.py
++python examples/fit_polyline_to_spline.py
++python examples/fit_shared_trajectory.py
++```
++
++The scripts contain assertions for the behaviors they demonstrate. The SVG-producing examples write files to the current working directory. They are also used as sources for the task-oriented [guides](guides/index.md).
+diff --git a/docs/guides/bezier.md b/docs/guides/bezier.md
+new file mode 100644
+index 0000000..4004e2c
+--- /dev/null
++++ b/docs/guides/bezier.md
+@@ -0,0 +1,42 @@
++# Bezier curves
++
++`CubicBezier` and `QuadraticBezier` store finite 2D control points. The `t` parameter lies in `[0, 1]` and is not generally proportional to arc length. This example follows [`bezier_basics.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/bezier_basics.py):
++
++```python
++import numpy as np
++
++from planarcurve.bezier import (
++    cubic_curvature,
++    cubic_derivative,
++    cubic_length,
++    cubic_second_derivative,
++    cubic_tangent,
++    evaluate_cubic,
++    flatten_cubic,
++    split_cubic,
++)
++from planarcurve.types import CubicBezier
++
++curve = CubicBezier((0.0, 0.0), (1.0, 2.0), (3.0, 2.0), (4.0, 0.0))
++t = np.linspace(0.0, 1.0, 21)
++points = evaluate_cubic(curve, t)
++first = cubic_derivative(curve, t)
++second = cubic_second_derivative(curve, t)
++unit = cubic_tangent(curve, t)
++curvature = cubic_curvature(curve, t)
++left, right = split_cubic(curve, 0.4)
++flat = flatten_cubic(curve, tolerance=0.01)
++approximate_length = cubic_length(curve)
++```
++
++## Evaluation and differential geometry
++
++The evaluators accept a finite one-dimensional array of parameters in `[0, 1]` and return points of shape `(N, 2)`. Derivative functions return the first or second derivative with respect to `t`. Tangent functions return normalized vectors by default; pass `unit=False` to get the raw first derivative. At a degenerate derivative, normalized tangent and signed curvature are zero.
++
++Signed curvature uses the orientation of the control-point order and has inverse-coordinate units. Quadratic curves have parallel evaluation, derivative, tangent, and curvature functions.
++
++## Split and approximate
++
++`split_cubic()` uses de Casteljau subdivision and returns two exact subcurves meeting at the split point. `flatten_cubic()` recursively subdivides until both interior control points are within `tolerance` of the endpoint chord. This is a flatness test based on control-point distance, not an arc-length error tolerance. If the requested flatness cannot be reached within `max_depth`, it raises `ValueError`.
++
++`cubic_length()` is approximate. It compares the endpoint chord with the control-polygon length, recursively subdividing and sharing the absolute tolerance between child pieces. Quadratic flattening and length use the same machinery after exact conversion to a cubic representation. Tolerance and recursion depth must be positive/valid as required by the respective API.
+diff --git a/docs/guides/fitting.md b/docs/guides/fitting.md
+new file mode 100644
+index 0000000..d7dd8cd
+--- /dev/null
++++ b/docs/guides/fitting.md
+@@ -0,0 +1,85 @@
++# Fitting
++
++Fitting is optional and requires SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. The package provides two separate workflows: fitting shared B-spline control points, and fitting a normalized heading-rate trajectory with occurrence placement transforms.
++
++## Fit spline control points
++
++A `SplineObservation` pairs parameter values `u` with observed 2D points `xy`. Optional nonnegative per-point weights control each observation's contribution. Multiple observations may be combined to solve one shared control-point set against the same spline basis.
++
++```python
++import numpy as np
++
++from planarcurve.fitting.spline import (
++    SplineFitOptions,
++    SplineObservation,
++    fit_spline_control_points,
++)
++from planarcurve.spline import BSplineCurve
++
++knots = (0.0,) * 4 + (0.5,) + (1.0,) * 4
++seed = BSplineCurve(knots, ((0, 0), (1, 2), (2, 2), (3, 0), (4, 0)))
++u = np.linspace(0.0, 1.0, 41)
++observed = seed.evaluate(u, derivatives=False).xy
++fit = fit_spline_control_points(
++    seed,
++    [SplineObservation(u, observed)],
++    options=SplineFitOptions(smoothness=0.02, seed_weight=0.01),
++)
++print(fit.residual_rms, fit.iterations)
++```
++
++`SplineFitOptions` controls:
++
++| Option | Effect |
++| --- | --- |
++| `smoothness` | Weight for second differences of adjacent control points. Larger values penalize rough control polygons. |
++| `seed_weight` | Regularization toward the supplied seed control points. |
++| `robust_scale` | Scale for the IRLS residual weights; large residuals are downweighted relative to this scale. |
++| `irls_iterations` | Number of iteratively reweighted least-squares solves. |
++| `endpoint_policy` | Independent start/end endpoint policies, each `free`, `locked`, or `anchored`. |
++| `endpoint_sigma` | Scale of the soft endpoint anchor residual. |
++
++An optional `seed_control_points` argument replaces the basis controls as the regularization seed. Endpoint policies mean:
++
++- `free`: the endpoint control is solved as an ordinary free control;
++- `locked`: the endpoint control remains exactly equal to the seed endpoint;
++- `anchored`: the endpoint is free but softly regularized toward the seed endpoint using `endpoint_sigma`.
++
++The returned `SplineFitResult.curve` is the fitted curve. `residual_rms` is the root-mean-square Euclidean residual over observed points, and `iterations` reports the configured IRLS iteration count. The [polyline-to-spline example](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) demonstrates noisy observations and outliers.
++
++## Fit a normalized trajectory
++
++Trajectory fitting represents shape canonically:
++
++- the profile trajectory has geometric length 1;
++- its starting heading is 0 degrees;
++- each observed occurrence gets a separate positive-scale `Similarity2D` transform.
++
++This separates normalized shape from occurrence scale, rotation, and translation. `fit_trajectory()` estimates one profile and one transform. `fit_shared_trajectory_profile()` estimates one shared profile and one transform for each input occurrence.
++
++### Residual units and weights
++
++Position residuals are divided by the observed occurrence length. Heading residuals are divided by `heading_sigma_deg`; total-turn residuals by `turn_sigma_deg`; and second-difference heading-rate smoothness residuals by `smoothness_sigma_deg_per_u`. The configured weights are dimensionless multipliers on those normalized residual groups. Reported position metrics remain in the input coordinate units.
++
++`TrajectoryFitOptions` groups related controls:
++
++| Group | Options | Role |
++| --- | --- | --- |
++| Model complexity | `change_count`, `min_change_spacing`, `max_heading_rate_deg_per_u` | Number and spacing of profile changes, plus the allowed rate range. |
++| Sampling and initialization | `samples`, `smoothing_window` | Resampling density and smoothing used to estimate initial heading information. |
++| Optimization | `restarts`, `seed`, `robust_scale`, `max_nfev` | Repeatability, robust least-squares loss, and evaluation budget. |
++| Residual weights | `position_weight`, `tangent_weight`, `endpoint_weight`, `endpoint_heading_weight`, `turn_weight`, `smoothness_weight` | Relative influence of position, heading/tangent, endpoint, turn, and smoothness residuals. |
++| Residual scales | `heading_sigma_deg`, `turn_sigma_deg`, `smoothness_sigma_deg_per_u` | Units/scales used to normalize angular and heading-rate residuals. |
++
++### Inspect fit results
++
++`TrajectoryFitResult` reports the fitted trajectory, its `Similarity2D`, optimizer `success` and `cost`, and these metrics:
++
++- `median_position_error` and `p95_position_error`, in input coordinate units;
++- `endpoint_error`, the larger positional error at either endpoint;
++- `endpoint_tangent_error_deg`, the larger endpoint heading error in degrees;
++- `total_turn_error_deg`, the absolute signed-turn mismatch in degrees.
++
++The shared-profile result reports aggregate median and 95th-percentile position errors plus `max_total_turn_error_deg` across occurrences. A result object alone does not imply convergence. Callers should inspect `.success`, `.cost`, and the metrics.
++
++The [shared trajectory example](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) synthesizes several scaled and rotated occurrences, fits one shared profile, and reports each placement transform.
+diff --git a/docs/guides/index.md b/docs/guides/index.md
+new file mode 100644
+index 0000000..c845942
+--- /dev/null
++++ b/docs/guides/index.md
+@@ -0,0 +1,15 @@
++# Guides
++
++Task-oriented workflows for each part of the package.
++
++```{toctree}
++:maxdepth: 1
++
++polylines
++bezier
++trajectories
++transforms
++splines
++fitting
++svg
++```
+diff --git a/docs/guides/polylines.md b/docs/guides/polylines.md
+new file mode 100644
+index 0000000..92dbdf6
+--- /dev/null
++++ b/docs/guides/polylines.md
+@@ -0,0 +1,71 @@
++# Working with polylines
++
++A polyline is a finite array of shape `(N, 2)`. Its length is the sum of the Euclidean lengths between consecutive vertices. The operations below share a single example:
++
++```python
++import numpy as np
++
++from planarcurve.polyline import (
++    bounding_box,
++    closest_point_on_polyline,
++    cumulative_arclength,
++    distance_to_polyline,
++    mean_squared_turn_angle,
++    normalized_arclength,
++    polyline_length,
++    project_points_to_polyline,
++    resample_polyline_by_arclength,
++    symmetric_polyline_distance,
++    unit_tangents,
++)
++
++line = np.array([[0.0, 0.0], [2.0, 0.0], [3.0, 1.0], [5.0, 1.0]])
++```
++
++## Measure and resample
++
++```python
++arc = cumulative_arclength(line)  # distance from the first vertex
++progress = normalized_arclength(line)  # cumulative distance divided by total
++length = polyline_length(line)
++even = resample_polyline_by_arclength(line, count=9)
++tangents = unit_tangents(line)
++bounds = bounding_box(line)  # xmin, ymin, xmax, ymax
++```
++
++The returned arc-length values are measured along the supplied piecewise-linear path, including repeated vertices. Normalized arc length and resampling require nonzero total length. Resampling removes consecutive near-duplicate positions before interpolation.
++
++`unit_tangents()` estimates tangents from neighboring vertices. At locations where the estimate degenerates, it returns a zero vector rather than dividing by zero.
++
++## Project queries
++
++```python
++queries = np.array([[2.5, 0.7], [4.0, 2.0]])
++projection = project_points_to_polyline(queries, line)
++nearest_points = projection.point
++nearest_distances = distance_to_polyline(queries, line)
++one_nearest = closest_point_on_polyline((2.5, 0.7), line)
++```
++
++`PolylineProjection` contains one result per query:
++
++| Field | Meaning | Shape |
++| --- | --- | --- |
++| `point` | Nearest projected point | `(M, 2)` |
++| `distance` | Euclidean distance to that point | `(M,)` |
++| `segment_index` | Index of the winning segment in the original polyline | `(M,)` |
++| `segment_t` | Clamped local parameter on the winning segment, from 0 to 1 | `(M,)` |
++| `arc_length` | Distance from the polyline start to the projected point | `(M,)` |
++
++`segment_t` is local to `segment_index`; `arc_length` is cumulative from the start of the polyline. Duplicate zero-length segments are tolerated.
++
++Projection compares every query with every segment. Its time and temporary-memory costs are `O(M*N)` for `M` queries and `N` segments, so it can be expensive for large inputs.
++
++## Compare shape and turning
++
++```python
++score = symmetric_polyline_distance(line, even, samples=64)
++turn_cost = mean_squared_turn_angle(line, samples=32)
++```
++
++The symmetric distance samples both inputs uniformly by arc length and averages the two directions of nearest-segment distances. It is an approximate shape score in input coordinate units. The optional `samples` argument to `mean_squared_turn_angle()` first resamples by arc length. The result is the mean squared turn angle in radians squared and is scale-independent.
+diff --git a/docs/guides/splines.md b/docs/guides/splines.md
+new file mode 100644
+index 0000000..318b295
+--- /dev/null
++++ b/docs/guides/splines.md
+@@ -0,0 +1,46 @@
++# B-splines and cubic paths
++
++This workflow adapts [`spline_to_bezier.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py). Install SciPy with `python -m pip install 'planarcurve[spline]'` before importing `planarcurve.spline`.
++
++## Construct a supported curve
++
++A cubic curve with five controls and one simple interior knot at `0.5` uses nine knots: four zeros, `0.5`, and four ones.
++
++```python
++import numpy as np
++
++from planarcurve.bezier import evaluate_cubic
++from planarcurve.spline import BSplineCurve
++
++curve = BSplineCurve(
++    knots=(0, 0, 0, 0, 0.5, 1, 1, 1, 1),
++    control_points=((0, 0), (1, 2), (2, 3), (3, 2), (4, 0)),
++)
++```
++
++Only clamped cubic geometry with simple interior knots is supported. See [spline concepts](../concepts/splines.md) for the full contract. General SciPy spline configurations are not accepted by this API.
++
++## Evaluate and sample
++
++```python
++parameters = np.linspace(0.0, 1.0, 21)
++evaluation = curve.evaluate(parameters)
++arc_samples = curve.sample_by_arclength(21)
++
++assert evaluation.xy.shape == (21, 2)
++assert arc_samples.tangent is not None
++assert arc_samples.curvature is not None
++```
++
++Ordinary evaluation uses the spline parameter, not distance along the curve. Arc-length sampling is approximate and includes differential geometry at the resulting sample parameters. An optional `Affine2D` can be passed to either evaluation or sampling; sampling then measures the transformed curve.
++
++## Convert to Bezier segments
++
++```python
++cubic_path = curve.to_cubic_path(tolerance=1e-8)
++beziers = cubic_path.to_beziers()
++local_t = np.linspace(0.0, 1.0, 21)
++converted = np.vstack([evaluate_cubic(bezier, local_t) for bezier in beziers])
++```
++
++`to_cubic_path()` returns a `CubicPath` with an explicit starting point and a sequence of cubic segments. `to_beziers()` turns that chain into individual `CubicBezier` values. The conversion inserts interior knots as needed and verifies approximation tolerance at sampled points within each span.
+diff --git a/docs/guides/svg.md b/docs/guides/svg.md
+new file mode 100644
+index 0000000..48c2129
+--- /dev/null
++++ b/docs/guides/svg.md
+@@ -0,0 +1,44 @@
++# SVG path adapters
++
++`planarcurve.svg` uses FontTools. Install it with `python -m pip install 'planarcurve[svg]'`. This guide follows [`svg_pipeline.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py).
++
++## Analyze and sample one path
++
++```python
++import numpy as np
++
++from planarcurve.svg import analyze_path, sample_path, transform_path
++from planarcurve.transforms import Affine2D
++
++path = "M 0 0 C 20 0 30 30 50 30 Q 70 30 80 10"
++info = analyze_path(path, samples_per_curve=64)
++samples = sample_path(path, samples_per_curve=64)
++transform = Affine2D.from_scale_shear_translation(
++    scale_x=1.5, scale_y=0.75, shear_x=0.2, dx=10.0, dy=-5.0
++)
++transformed = transform_path(path, transform)
++```
++
++`analyze_path()` returns aggregate `PathInfo`: start/end points, endpoint tangents, estimated length, bounding box, move count, aggregate closed status, and per-subpath closed flags. `samples_per_curve` controls the number of subdivisions used to sample each quadratic or cubic segment, and thus affects curve-length and endpoint-tangent estimates.
++
++The adapter supports the ordinary move, line, cubic, quadratic, close, and end-path operations produced by FontTools' parser. It rejects unsupported recorded operations and special compound quadratic forms. It does not claim to implement every rule or command in the full SVG specification.
++
++## Multiple subpaths
++
++`sample_path()` is for exactly one subpath and raises `ValueError` if the parsed path contains multiple `moveTo` operations. Use `sample_subpaths()` to receive a tuple of independent arrays. No artificial connecting segment is inserted between subpaths.
++
++For `PathInfo`:
++
++- `closed` is true only when all subpaths are closed;
++- `subpath_closed` records the closed flag for each subpath;
++- `start` and `tangent_start` refer to the first subpath;
++- `end` and `tangent_end` refer to the last subpath;
++- `move_count` is the number of subpaths;
++- `length` is the sum of sampled subpath chord lengths;
++- `bbox` encloses the sampled points.
++
++Endpoint tangents are unit vectors or `None` when no nonzero segment provides a direction.
++
++## Other adapters
++
++`transform_path()` transforms every supported command coordinate while preserving subpath commands. `path_without_initial_move()` returns the drawing commands after the initial move, for paths containing a single move operation. `cubic_bridge(p0, t0, p3, t3, tension)` constructs an SVG cubic command between endpoints using the supplied endpoint directions; omitted tangents default to `(1, 0)`. Its `tension` is measured in coordinate units.
+diff --git a/docs/guides/trajectories.md b/docs/guides/trajectories.md
+new file mode 100644
+index 0000000..fa76112
+--- /dev/null
++++ b/docs/guides/trajectories.md
+@@ -0,0 +1,57 @@
++# Trajectories
++
++This guide adapts [`trajectory_gallery.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/trajectory_gallery.py) and adds evaluation and cubic conversion. A `Trajectory2D` starts at `(0, 0)` and describes heading rate over normalized progress `u ∈ [0, 1]`.
++
++## Straight, constant-rate, and changing profiles
++
++```python
++import numpy as np
++
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_trajectory_at,
++    trajectory_to_cubic_path,
++    trajectory_total_turn,
++)
++
++straight = HeadingRateProfile(0.0, 0.0)
++arc = HeadingRateProfile(90.0, 90.0, interpolation="linear")
++changing = HeadingRateProfile(
++    0.0,
++    0.0,
++    changes=(HeadingRateChange(0.30, 240.0), HeadingRateChange(0.70, -240.0)),
++)
++linear = HeadingRateProfile(0.0, 0.0, changes=changing.changes, interpolation="linear")
++hermite = HeadingRateProfile(0.0, 0.0, changes=changing.changes, interpolation="cubic-hermite")
++trajectory = Trajectory2D(length=140.0, start_heading_deg=0.0, heading_rate=hermite)
++sample = trajectory.evaluate(count=513)
++```
++
++The default interpolation is `"cubic-hermite"`. It computes shape-preserving slopes from the rates. `"linear"` connects the rate knots with straight segments. In both modes, the heading-rate knots must be strictly ordered interior positions.
++
++## Read a sample and endpoint
++
++`TrajectorySample` provides arrays for `u`, `xy`, `heading_deg`, `heading_rate_deg_per_u`, `tangent`, and `arc_length`, along with `end_pose`. Position samples are numerical integrations of the heading-derived tangent. Heading is obtained from the exact piecewise antiderivative, and theoretical arc length is `trajectory.length * u`.
++
++```python
++assert sample.xy.shape == (513, 2)
++assert np.allclose(sample.arc_length, trajectory.length * sample.u)
++print(sample.xy[-1])
++print(sample.end_pose.position, sample.end_pose.heading_deg)
++print(sample.end_pose.heading_rate_deg_per_u)
++print(trajectory_total_turn(trajectory))  # signed degrees
++```
++
++Heading and heading rate are in degrees and degrees per unit `u`, respectively. Curvature is signed and measured in inverse coordinate length. `evaluate_trajectory_at(trajectory, values)` accepts arbitrary finite `u` values in `[0, 1]` and returns `(xy, heading_deg)` arrays.
++
++## Convert to a cubic path
++
++```python
++path = trajectory_to_cubic_path(trajectory, max_error=1e-3)
++beziers = path.to_beziers()
++print(len(path.segments), len(beziers))
++```
++
++Conversion adaptively subdivides and checks the trajectory against each cubic at quarter, midpoint, and three-quarter parameters. `max_error` is a sampled acceptance threshold, not a formal global error bound. See [trajectory concepts](../concepts/trajectories.md) for the integration model and parameter semantics.
+diff --git a/docs/guides/transforms.md b/docs/guides/transforms.md
+new file mode 100644
+index 0000000..39a4a02
+--- /dev/null
++++ b/docs/guides/transforms.md
+@@ -0,0 +1,48 @@
++# Transforms
++
++`Affine2D` represents a 2D linear map followed by a translation. Its matrix convention is
++
++```text
++[x']   [m00 m01] [x]   [dx]
++[y'] = [m10 m11] [y] + [dy]
++```
++
++The constructors cover identity, translation, uniform or nonuniform scale, rotation in degrees, and a basis transform:
++
++```python
++from planarcurve.transforms import Affine2D, Similarity2D
++
++identity = Affine2D.identity()
++move = Affine2D.translation_only(4.0, -2.0)
++scale = Affine2D.scale(2.0, 0.5)
++rotate = Affine2D.rotation(30.0)
++basis = Affine2D.from_basis(origin=(1, 2), x_axis=(2, 0), y_axis=(0, 3))
++custom = Affine2D.from_scale_shear_translation(
++    scale_x=2.0, scale_y=0.5, shear_x=0.25, dx=4.0, dy=-2.0
++)
++```
++
++The `scale_x`/`shear_x` constructor uses `x' = scale_x * (x + shear_x*y) + dx` and `y' = scale_y*y + dy`.
++
++## Apply, inspect, and invert
++
++```python
++points = [(0.0, 0.0), (1.0, 0.0)]
++placed = custom.apply(points)
++vectors = custom.apply_vectors(points)  # no translation
++area_scale = custom.determinant
++restored = custom.inverse().apply(placed)
++```
++
++`determinant` is the determinant of the linear component. `inverse()` raises `ValueError` for singular transforms. Both point and vector methods accept one point or arrays with final dimension 2.
++
++## Composition order
++
++`a.compose(b)` means `a ∘ b`: first apply `b`, then apply `a`.
++
++```python
++placement = Affine2D.translation_only(10.0, 0.0).compose(Affine2D.rotation(90.0))
++result = placement.apply([(1.0, 0.0)])  # rotate to (0, 1), then translate to (10, 1)
++```
++
++`Similarity2D` packages a positive uniform scale, rotation in degrees, and translation. `as_affine()` returns the equivalent `Affine2D`, and `apply()` transforms points in the same order: uniform scale and rotation, followed by translation. Similarities are useful when occurrences may change overall size and placement but should preserve shape.
+diff --git a/docs/index.md b/docs/index.md
+new file mode 100644
+index 0000000..8c85ce1
+--- /dev/null
++++ b/docs/index.md
+@@ -0,0 +1,59 @@
++# planarcurve
++
++`planarcurve` provides numerical building blocks for 2D polylines, Bezier curves, normalized heading-rate trajectories, transforms, cubic B-splines, fitting, and SVG paths. The core uses NumPy; SciPy and FontTools integrations are optional.
++
++## Choose a module
++
++| Need | Module | Optional dependency |
++| --- | --- | --- |
++| Polyline lengths, resampling, projection, and scores | `planarcurve.polyline` | None |
++| Bezier evaluation, derivatives, flattening, and length | `planarcurve.bezier` and `planarcurve.types` | None |
++| Normalized heading-rate trajectories | `planarcurve.trajectory` | None |
++| Affine and similarity transforms | `planarcurve.transforms` | None |
++| Cubic B-spline evaluation and conversion | `planarcurve.spline` | SciPy |
++| Spline and trajectory fitting | `planarcurve.fitting` | SciPy |
++| SVG path analysis and adapters | `planarcurve.svg` | FontTools |
++
++## Quick example
++
++Resample a piecewise-linear curve at equal chord-length intervals:
++
++```python
++import numpy as np
++
++from planarcurve.polyline import (
++    cumulative_arclength,
++    normalized_arclength,
++    polyline_length,
++    resample_polyline_by_arclength,
++)
++
++points = np.array([[0.0, 0.0], [1.0, 1.0], [3.0, 0.0]])
++length = polyline_length(points)
++arc = cumulative_arclength(points)
++progress = normalized_arclength(points)
++resampled = resample_polyline_by_arclength(points, count=5)
++print(f"length: {length:.3f}")
++print(resampled)
++```
++
++Start with the [quickstart](quickstart.md), then choose from [concepts](concepts/index.md), [guides](guides/index.md), [examples](examples.md), or the [API reference](api/index.md). See [installation](installation.md) for optional dependencies and [development](development.md) for local checks.
++
++:::{admonition} Pre-release status
++:class: warning
++
++`planarcurve` is a pre-1.0 `0.x` project. Public names and numerical behavior may change between minor releases.
++:::
++
++```{toctree}
++:maxdepth: 2
++:hidden:
++
++installation
++quickstart
++concepts/index
++guides/index
++examples
++api/index
++development
++```
+diff --git a/docs/installation.md b/docs/installation.md
+new file mode 100644
+index 0000000..9256ef5
+--- /dev/null
++++ b/docs/installation.md
+@@ -0,0 +1,26 @@
++# Installation
++
++`planarcurve` requires Python 3.10 or newer. The core geometry package depends on NumPy. Install an extra only when using its integration:
++
++| Capability | Install | Dependency |
++| --- | --- | --- |
++| Core trajectories, transforms, polylines, and Beziers | `python -m pip install planarcurve` | NumPy |
++| B-splines | `python -m pip install 'planarcurve[spline]'` | SciPy |
++| Fitting | `python -m pip install 'planarcurve[fit]'` | SciPy |
++| SVG adapters | `python -m pip install 'planarcurve[svg]'` | FontTools |
++| Everything | `python -m pip install 'planarcurve[all]'` | SciPy and FontTools |
++
++For development, install the package and its test/lint tools in editable mode:
++
++```bash
++python -m pip install -e '.[dev]'
++```
++
++To build the documentation locally, install all integrations and the documentation toolchain:
++
++```bash
++python -m pip install -e '.[all]'
++python -m pip install -r docs/requirements.txt
++```
++
++Importing `planarcurve` or its core modules does not import SciPy or FontTools. Optional imports live in `planarcurve.spline`, `planarcurve.fitting`, and `planarcurve.svg`. The core-only import boundary is checked in CI.
+diff --git a/docs/make.bat b/docs/make.bat
+new file mode 100644
+index 0000000..d6a9242
+--- /dev/null
++++ b/docs/make.bat
+@@ -0,0 +1,113 @@
++@ECHO OFF
++
++REM Command file for Sphinx documentation
++
++set SPHINXBUILD=sphinx-build
++set BUILDDIR=build
++set ALLSPHINXOPTS=-d %BUILDDIR%/doctrees %SPHINXOPTS% .
++if NOT "%PAPER%" == "" (
++	set ALLSPHINXOPTS=-D latex_paper_size=%PAPER% %ALLSPHINXOPTS%
++)
++
++if "%1" == "" goto help
++
++if "%1" == "help" (
++	:help
++	echo.Please use `make ^<target^>` where ^<target^> is one of
++	echo.  html      to make standalone HTML files
++	echo.  dirhtml   to make HTML files named index.html in directories
++	echo.  pickle    to make pickle files
++	echo.  json      to make JSON files
++	echo.  htmlhelp  to make HTML files and a HTML help project
++	echo.  qthelp    to make HTML files and a qthelp project
++	echo.  latex     to make LaTeX files, you can set PAPER=a4 or PAPER=letter
++	echo.  changes   to make an overview over all changed/added/deprecated items
++	echo.  linkcheck to check all external links for integrity
++	echo.  doctest   to run all doctests embedded in the documentation if enabled
++	goto end
++)
++
++if "%1" == "clean" (
++	for /d %%i in (%BUILDDIR%\*) do rmdir /q /s %%i
++	del /q /s %BUILDDIR%\*
++	goto end
++)
++
++if "%1" == "html" (
++	%SPHINXBUILD% -b html %ALLSPHINXOPTS% %BUILDDIR%/html
++	echo.
++	echo.Build finished. The HTML pages are in %BUILDDIR%/html.
++	goto end
++)
++
++if "%1" == "dirhtml" (
++	%SPHINXBUILD% -b dirhtml %ALLSPHINXOPTS% %BUILDDIR%/dirhtml
++	echo.
++	echo.Build finished. The HTML pages are in %BUILDDIR%/dirhtml.
++	goto end
++)
++
++if "%1" == "pickle" (
++	%SPHINXBUILD% -b pickle %ALLSPHINXOPTS% %BUILDDIR%/pickle
++	echo.
++	echo.Build finished; now you can process the pickle files.
++	goto end
++)
++
++if "%1" == "json" (
++	%SPHINXBUILD% -b json %ALLSPHINXOPTS% %BUILDDIR%/json
++	echo.
++	echo.Build finished; now you can process the JSON files.
++	goto end
++)
++
++if "%1" == "htmlhelp" (
++	%SPHINXBUILD% -b htmlhelp %ALLSPHINXOPTS% %BUILDDIR%/htmlhelp
++	echo.
++	echo.Build finished; now you can run HTML Help Workshop with the ^
++.hhp project file in %BUILDDIR%/htmlhelp.
++	goto end
++)
++
++if "%1" == "qthelp" (
++	%SPHINXBUILD% -b qthelp %ALLSPHINXOPTS% %BUILDDIR%/qthelp
++	echo.
++	echo.Build finished; now you can run "qcollectiongenerator" with the ^
++.qhcp project file in %BUILDDIR%/qthelp, like this:
++	echo.^> qcollectiongenerator %BUILDDIR%\qthelp\PyWavelets.qhcp
++	echo.To view the help file:
++	echo.^> assistant -collectionFile %BUILDDIR%\qthelp\PyWavelets.ghc
++	goto end
++)
++
++if "%1" == "latex" (
++	%SPHINXBUILD% -b latex %ALLSPHINXOPTS% %BUILDDIR%/latex
++	echo.
++	echo.Build finished; the LaTeX files are in %BUILDDIR%/latex.
++	goto end
++)
++
++if "%1" == "changes" (
++	%SPHINXBUILD% -b changes %ALLSPHINXOPTS% %BUILDDIR%/changes
++	echo.
++	echo.The overview file is in %BUILDDIR%/changes.
++	goto end
++)
++
++if "%1" == "linkcheck" (
++	%SPHINXBUILD% -b linkcheck %ALLSPHINXOPTS% %BUILDDIR%/linkcheck
++	echo.
++	echo.Link check complete; look for any errors in the above output ^
++or in %BUILDDIR%/linkcheck/output.txt.
++	goto end
++)
++
++if "%1" == "doctest" (
++	%SPHINXBUILD% -b doctest %ALLSPHINXOPTS% %BUILDDIR%/doctest
++	echo.
++	echo.Testing of doctests in the sources finished, look at the ^
++results in %BUILDDIR%/doctest/output.txt.
++	goto end
++)
++
++:end
+diff --git a/docs/make.py b/docs/make.py
+new file mode 100755
+index 0000000..b540a0d
+--- /dev/null
++++ b/docs/make.py
+@@ -0,0 +1,81 @@
++#!/usr/bin/env python
++"""
++Script to build documentation for planarcurve.
++
++This script builds the Sphinx documentation for the planarcurve package.
++It can be run using:
++    python docs/make.py [option]
++
++Options:
++    clean   - clean the build directory
++    html    - build HTML documentation
++    dirhtml - build HTML documentation with directory structure
++    all     - build all documentation formats
++    help    - show help message
++"""
++
++import os
++import shutil
++import subprocess
++import sys
++
++
++def main():
++    """Run the script."""
++    sphinx_build = "sphinx-build"
++
++    script_dir = os.path.dirname(os.path.abspath(__file__))
++    build_dir = os.path.join(script_dir, "_build")
++    source_dir = script_dir
++    target = "html" if len(sys.argv) < 2 else sys.argv[1]
++
++    if target == "clean":
++        if os.path.exists(build_dir):
++            print(f"Cleaning {build_dir}...")
++            shutil.rmtree(build_dir)
++        return 0
++
++    if target == "help":
++        print(__doc__)
++        return 0
++
++    if not os.path.exists(build_dir):
++        os.makedirs(build_dir)
++
++    # Set of valid targets
++    valid_targets = {
++        "html",
++        "dirhtml",
++        "latex",
++        "latexpdf",
++        "text",
++        "man",
++        "changes",
++        "linkcheck",
++        "doctest",
++        "all",
++    }
++
++    if target not in valid_targets:
++        print(f"Unknown target: {target}")
++        print("Use 'help' target for help")
++        return 1
++
++    if target == "all":
++        # Build all formats
++        for fmt in ["html", "dirhtml", "latex"]:
++            cmd = [sphinx_build, "-b", fmt, source_dir, os.path.join(build_dir, fmt)]
++            print(f"Building {fmt} documentation...")
++            subprocess.run(cmd, check=True)
++    else:
++        # Build specific format
++        cmd = [sphinx_build, "-b", target, source_dir, os.path.join(build_dir, target)]
++        print(f"Building {target} documentation...")
++        subprocess.run(cmd, check=True)
++
++    print(f"Build finished. Documentation is in {os.path.join(build_dir, target)}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/docs/quickstart.md b/docs/quickstart.md
+new file mode 100644
+index 0000000..4f3832d
+--- /dev/null
++++ b/docs/quickstart.md
+@@ -0,0 +1,66 @@
++# Quickstart
++
++This short workflow moves from sampled points to a transformed trajectory. Each module also has a focused [guide](guides/index.md).
++
++## Measure and resample a polyline
++
++A polyline is an `(N, 2)` array of finite 2D points. Its length is the sum of its segment lengths, and resampling uses equal intervals along that piecewise-linear geometry.
++
++```python
++import numpy as np
++
++from planarcurve.polyline import polyline_length, resample_polyline_by_arclength
++
++points = np.array([[0.0, 0.0], [1.0, 2.0], [3.0, 1.0]])
++print(polyline_length(points))
++samples = resample_polyline_by_arclength(points, count=9)
++```
++
++## Evaluate a cubic Bezier
++
++Bezier parameters `t` run from 0 to 1 and are not arc-length parameters.
++
++```python
++from planarcurve.bezier import evaluate_cubic
++from planarcurve.types import CubicBezier
++
++curve = CubicBezier((0, 0), (1, 2), (3, 2), (4, 0))
++curve_points = evaluate_cubic(curve, np.linspace(0.0, 1.0, 25))
++```
++
++## Construct a normalized trajectory
++
++Trajectory progress `u` also runs from 0 to 1, but has a distinct meaning: it is normalized progress at constant geometric speed. Heading rates are degrees per unit `u`.
++
++```python
++from planarcurve.trajectory import HeadingRateChange, HeadingRateProfile, Trajectory2D
++
++trajectory = Trajectory2D(
++    length=12.0,
++    start_heading_deg=15.0,
++    heading_rate=HeadingRateProfile(
++        start_rate_deg_per_u=0.0,
++        changes=(HeadingRateChange(0.5, 180.0),),
++        end_rate_deg_per_u=0.0,
++        interpolation="linear",
++    ),
++)
++sample = trajectory.evaluate(count=129)
++```
++
++`sample.xy` contains numerically integrated positions. `sample.arc_length` is theoretical and equals `trajectory.length * sample.u` exactly, up to floating-point arithmetic.
++
++## Place the trajectory with a transform
++
++A trajectory begins at the origin. Apply an affine map to place or orient its sampled points:
++
++```python
++from planarcurve.transforms import Affine2D
++
++placement = Affine2D.rotation(30.0).compose(Affine2D.translation_only(5.0, 2.0))
++placed_points = placement.apply(sample.xy)
++```
++
++Composition is `a.compose(b) == a ∘ b`: `b` is applied first, then `a`.
++
++B-splines and fitting are documented in the [spline](guides/splines.md) and [fitting](guides/fitting.md) guides and require SciPy. SVG adapters in the [SVG guide](guides/svg.md) require FontTools.
+diff --git a/docs/requirements.txt b/docs/requirements.txt
+new file mode 100644
+index 0000000..914dd2f
+--- /dev/null
++++ b/docs/requirements.txt
+@@ -0,0 +1,4 @@
++sphinx>=7.0.0
++sphinx-rtd-theme>=2.0.0
++sphinx-autobuild>=2024.0.0
++myst-parser>=2.0.0
+diff --git a/planarcurve/fitting/spline.py b/planarcurve/fitting/spline.py
+index 62a7142..9442207 100644
+--- a/planarcurve/fitting/spline.py
++++ b/planarcurve/fitting/spline.py
+@@ -30,7 +30,15 @@ class SplineObservation:
+
+ @dataclass(frozen=True)
+ class SplineFitOptions:
+-    """Regularization, robust-fit, and endpoint settings for spline fitting."""
++    """Regularization, robust-fit, and endpoint settings for spline fitting.
++
++    ``smoothness`` penalizes second differences of control points, and
++    ``seed_weight`` regularizes controls toward the seed. IRLS downweights
++    residuals larger than ``robust_scale`` for ``irls_iterations`` solves.
++    ``endpoint_policy`` independently chooses ``free``, ``locked``, or
++    ``anchored`` for each endpoint. Anchored endpoints are softly pulled toward
++    the seed with scale ``endpoint_sigma``. See the fitting guide for details.
++    """
+
+     smoothness: float = 0.02
+     seed_weight: float = 0.01
+@@ -132,7 +140,29 @@ def fit_spline_control_points(
+     seed_control_points: ArrayLike | None = None,
+     options: SplineFitOptions | None = None,
+ ) -> SplineFitResult:
+-    """Fit shared B-spline controls with sparse weighted least squares and IRLS."""
++    """Fit shared B-spline controls with sparse weighted least squares and IRLS.
++
++    Observations may have per-point nonnegative weights. Smoothness and seed
++    penalties regularize the controls; IRLS reduces the influence of large
++    residuals. Endpoint policy determines whether seed endpoints are free,
++    fixed, or softly anchored.
++
++    Parameters
++    ----------
++    basis : BSplineCurve
++        Supported cubic spline geometry providing knots and initial controls.
++    observations : sequence of SplineObservation
++        Samples at normalized parameters, optionally weighted per point.
++    seed_control_points : array_like, shape (n_control_points, 2), optional
++        Controls used as the regularization seed. Defaults to the basis controls.
++    options : SplineFitOptions, optional
++        Smoothness, robust-fit, and endpoint settings.
++
++    Returns
++    -------
++    SplineFitResult
++        Fitted curve, residual RMS, and configured IRLS iteration count.
++    """
+     if options is None:
+         options = SplineFitOptions()
+     parameter_arrays, observed_xy, base_weights = _validated_observations(observations)
+diff --git a/planarcurve/fitting/trajectory.py b/planarcurve/fitting/trajectory.py
+index 9988e60..4c522d2 100644
+--- a/planarcurve/fitting/trajectory.py
++++ b/planarcurve/fitting/trajectory.py
+@@ -37,7 +37,16 @@ from .parameters import (
+
+ @dataclass(frozen=True)
+ class TrajectoryFitOptions:
+-    """Optimization settings for normalized trajectory fitting."""
++    """Optimization settings for fitting normalized heading-rate profiles.
++
++    Model complexity is set by ``change_count``, ``min_change_spacing``, and
++    ``max_heading_rate_deg_per_u``. Sampling/initialization uses ``samples`` and
++    ``smoothing_window``. ``restarts``, ``seed``, ``robust_scale``, and
++    ``max_nfev`` configure optimization. The dimensionless ``*_weight`` fields
++    scale residual groups, while ``heading_sigma_deg``, ``turn_sigma_deg``, and
++    ``smoothness_sigma_deg_per_u`` specify residual scales. See the fitting
++    guide for the complete option table and units.
++    """
+
+     change_count: int
+     samples: int = 64
+@@ -368,7 +377,28 @@ def _profile_residuals(
+
+
+ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> TrajectoryFitResult:
+-    """Fit one normalized trajectory and a similarity transform to ordered points."""
++    """Fit a normalized trajectory profile and a similarity placement to points.
++
++    The fitted profile has length 1 and starting heading 0 degrees. Its
++    occurrence is placed by a separate positive-scale ``Similarity2D``. Position
++    residuals are normalized by observed polyline length; heading, turn, and
++    smoothness residuals use their configured sigma scales. Optimization uses a
++    robust least-squares loss.
++
++    Parameters
++    ----------
++    points : array_like, shape (N, 2)
++        Ordered finite samples of one observed curve.
++    options : TrajectoryFitOptions
++        Model, sampling, and optimization settings.
++
++    Returns
++    -------
++    TrajectoryFitResult
++        Fitted canonical profile, placement transform, optimizer status/cost,
++        and position/heading metrics. Inspect ``success`` and ``cost`` rather
++        than assuming that a result object implies convergence.
++    """
+     target_points, target_heading, target_length = _target_state(points, options)
+     codec = _ProfileCodec(options)
+     positions, rates = _initial_profile(target_points, target_heading, options)
+@@ -439,7 +469,27 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
+ def fit_shared_trajectory_profile(
+     occurrences: Sequence[ArrayLike], options: TrajectoryFitOptions
+ ) -> SharedTrajectoryFitResult:
+-    """Fit one normalized trajectory profile shared by transformed occurrences."""
++    """Fit one normalized profile shared across transformed occurrences.
++
++    The shared profile has length 1 and starting heading 0 degrees. Each input
++    occurrence receives its own positive-scale ``Similarity2D`` placement.
++    Position residuals are normalized by each occurrence's observed length;
++    heading, turn, and smoothness residuals use the configured sigma scales.
++    The optimizer uses a robust least-squares loss.
++
++    Parameters
++    ----------
++    occurrences : sequence of array_like, each shape (N, 2)
++        Ordered finite samples for one or more observed curves.
++    options : TrajectoryFitOptions
++        Shared profile, sampling, and optimization settings.
++
++    Returns
++    -------
++    SharedTrajectoryFitResult
++        The common profile, one transform per occurrence, optimizer
++        status/cost, and aggregate metrics. Inspect ``success`` and ``cost``.
++    """
+     if not occurrences:
+         raise ValueError("at least one occurrence is required")
+     states = [_target_state(points, options) for points in occurrences]
+diff --git a/planarcurve/polyline.py b/planarcurve/polyline.py
+index c1bd508..9c54a48 100644
+--- a/planarcurve/polyline.py
++++ b/planarcurve/polyline.py
+@@ -88,7 +88,21 @@ def bounding_box(points: ArrayLike) -> tuple[float, float, float, float]:
+
+ @dataclass(frozen=True)
+ class PolylineProjection:
+-    """Nearest-point projection results for an array of query points."""
++    """Nearest-point results, one row per query point.
++
++    Attributes
++    ----------
++    point : (M, 2) float array
++        Projected points on the polyline.
++    distance : (M,) float array
++        Euclidean distance from each query to its projection.
++    segment_index : (M,) integer array
++        Index of the winning segment in the input polyline.
++    segment_t : (M,) float array
++        Clamped local parameter in ``[0, 1]`` on the winning segment.
++    arc_length : (M,) float array
++        Cumulative distance from the polyline start to each projection.
++    """
+
+     point: FloatArray
+     distance: FloatArray
+@@ -98,7 +112,31 @@ class PolylineProjection:
+
+
+ def project_points_to_polyline(points: ArrayLike, polyline: ArrayLike) -> PolylineProjection:
+-    """Project query points onto all segments and retain each nearest result."""
++    """Project each query onto the nearest segment of a 2D polyline.
++
++    Every query is compared with every segment. For ``M`` queries and ``N``
++    segments, both time and temporary memory are ``O(M*N)``. Zero-length
++    segments are allowed and contribute their endpoint as a candidate.
++
++    Parameters
++    ----------
++    points : array_like, shape (M, 2)
++        Finite query points.
++    polyline : array_like, shape (K, 2)
++        Finite polyline vertices, with at least two rows.
++
++    Returns
++    -------
++    PolylineProjection
++        Nearest points, distances, winning segment indices and local
++        parameters, and cumulative arc lengths from the polyline start.
++
++    Raises
++    ------
++    ValueError
++        If the inputs are not finite 2D arrays or the polyline has fewer than
++        two vertices.
++    """
+     queries = _points(points)
+     vertices = _points(polyline)
+     if len(vertices) < 2:
+diff --git a/planarcurve/spline.py b/planarcurve/spline.py
+index 175ab26..8ff2033 100644
+--- a/planarcurve/spline.py
++++ b/planarcurve/spline.py
+@@ -23,7 +23,15 @@ from .types import CubicPath, CubicSegment, FloatArray, _finite_point, _require_
+
+ @dataclass(frozen=True)
+ class BSplineCurve:
+-    """Clamped cubic B-spline on [0, 1] with simple interior knots."""
++    """Clamped cubic B-spline on ``[0, 1]`` with simple interior knots.
++
++    A curve requires degree 3, at least four finite 2D control points, and
++    ``n_control_points + 4`` finite, nondecreasing knots. The first and last
++    four knots must be 0 and 1 respectively. Interior knots must be distinct
++    and lie strictly inside ``(0, 1)``. This supported subset enables
++    predictable conversion to cubic Bezier spans; it is not a general SciPy
++    ``BSpline`` wrapper. See the spline concepts page for the rationale.
++    """
+
+     knots: ArrayLike
+     control_points: ArrayLike
+@@ -63,7 +71,21 @@ class BSplineCurve:
+
+ @dataclass(frozen=True)
+ class CurveEvaluation:
+-    """Spline positions and optional differential geometry at sample parameters."""
++    """Spline evaluation arrays at normalized parameter values.
++
++    Attributes
++    ----------
++    u : (N,) float array
++        Parameters in ``[0, 1]``.
++    xy : (N, 2) float array
++        Evaluated 2D positions, in the geometry's coordinate units.
++    tangent : (N, 2) float array or None
++        Unit tangent vectors, or ``None`` when derivatives were not requested.
++    curvature : (N,) float array or None
++        Signed geometric curvature in inverse coordinate units, or ``None``
++        when derivatives were not requested. Degenerate derivative locations
++        produce zero values.
++    """
+
+     u: FloatArray
+     xy: FloatArray
+@@ -169,7 +191,14 @@ def sample_curve_by_arclength(
+     *,
+     transform: Affine2D | None = None,
+ ) -> CurveEvaluation:
+-    """Sample the spline approximately uniformly by transformed arc length."""
++    """Sample approximately uniformly in transformed arc length.
++
++    A dense grid of ``max(1024, count * 32)`` parameter values is evaluated,
++    chord lengths are accumulated, and target distances are interpolated back
++    to parameter values. The optional transform is included in the distance
++    calculation. This is a sampled approximation, not exact arc-length
++    inversion.
++    """
+     count = _require_integer(count, name="count", minimum=2)
+     dense_u = np.linspace(0.0, 1.0, max(1024, count * 32))
+     dense = evaluate_bspline(geometry, dense_u, transform=transform, derivatives=False).xy
+diff --git a/planarcurve/svg.py b/planarcurve/svg.py
+index bd71ee6..92f9930 100644
+--- a/planarcurve/svg.py
++++ b/planarcurve/svg.py
+@@ -21,11 +21,25 @@ from .types import CubicBezier, FloatArray, Point2D, PointLike, QuadraticBezier,
+
+ @dataclass(frozen=True)
+ class PathInfo:
+-    """Aggregate geometry metadata across an SVG path's subpaths.
+-
+-    ``start`` and ``tangent_start`` refer to the first subpath, while ``end``
+-    and ``tangent_end`` refer to the last. ``closed`` is true only when every
+-    subpath is closed; ``subpath_closed`` records each subpath's status.
++    """Aggregate sampled geometry metadata across SVG subpaths.
++
++    Attributes
++    ----------
++    start, end : 2-tuples of float
++        First point of the first subpath and last point of the last subpath.
++    tangent_start, tangent_end : 2-tuples of float or None
++        Unit endpoint directions for the first and last subpaths, or ``None``
++        when no nonzero sampled segment provides a direction.
++    length : float
++        Sum of sampled subpath chord lengths, in path coordinate units.
++    bbox : (xmin, ymin, xmax, ymax)
++        Bounds of the sampled path points, in path coordinate units.
++    move_count : int
++        Number of parsed subpaths.
++    closed : bool
++        True only when every subpath is closed.
++    subpath_closed : tuple of bool
++        Closed status for each subpath, in path order.
+     """
+
+     start: Point2D
+@@ -168,7 +182,12 @@ def _endpoint_direction(points: FloatArray, *, from_start: bool) -> Point2D | No
+
+
+ def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
+-    """Inspect sampled geometry; curve lengths and endpoint tangents are approximations."""
++    """Analyze sampled SVG path geometry and report aggregate metadata.
++
++    Curves are sampled into ``samples_per_curve`` intervals. Length and
++    endpoint tangent estimates therefore depend on that sampling density; the
++    bounding box is also computed from sampled points.
++    """
+     subpaths, closed_subpaths = _sample_subpaths(path, samples_per_curve)
+     all_points = np.concatenate(subpaths, axis=0)
+     first_direction = _endpoint_direction(subpaths[0], from_start=True)
+diff --git a/planarcurve/trajectory.py b/planarcurve/trajectory.py
+index 778599c..49055a5 100644
+--- a/planarcurve/trajectory.py
++++ b/planarcurve/trajectory.py
+@@ -29,7 +29,14 @@ class HeadingRateChange:
+
+ @dataclass(frozen=True)
+ class HeadingRateProfile:
+-    """Piecewise heading-rate profile over normalized progress."""
++    """Heading-rate knots and interpolation over normalized progress.
++
++    ``start_rate_deg_per_u`` and ``end_rate_deg_per_u`` are rates in degrees
++    per unit ``u``. ``changes`` contains strictly ordered interior knots with
++    ``at`` values in ``(0, 1)``. ``interpolation`` is ``"linear"`` or
++    ``"cubic-hermite"``. The latter computes shape-preserving slopes from the
++    rate knots; callers do not supply derivative values.
++    """
+
+     start_rate_deg_per_u: float
+     end_rate_deg_per_u: float
+@@ -52,7 +59,14 @@ class HeadingRateProfile:
+
+ @dataclass(frozen=True)
+ class Trajectory2D:
+-    """Planar curve with constant speed and a piecewise heading-rate profile."""
++    """Constant-speed planar curve defined by a normalized heading-rate profile.
++
++    The trajectory starts at ``(0, 0)``. ``length`` is its positive geometric
++    arc length, ``start_heading_deg`` is measured in degrees, and
++    ``heading_rate`` is measured in degrees per unit normalized progress ``u``.
++    Theoretical arc length is ``length * u``; positions are obtained by
++    numerical integration of the heading-derived tangent.
++    """
+
+     length: float
+     start_heading_deg: float
+@@ -71,7 +85,11 @@ class Trajectory2D:
+
+ @dataclass(frozen=True)
+ class Pose2D:
+-    """Position, heading, and heading rate at one trajectory endpoint."""
++    """One trajectory endpoint pose.
++
++    ``position`` is a two-element vector in coordinate units. ``heading_deg``
++    is in degrees; ``heading_rate_deg_per_u`` is in degrees per unit progress.
++    """
+
+     position: FloatArray
+     heading_deg: float
+@@ -80,7 +98,27 @@ class Pose2D:
+
+ @dataclass(frozen=True)
+ class TrajectorySample:
+-    """Sampled trajectory fields at normalized progress values."""
++    """Samples of a trajectory at uniformly spaced normalized progress values.
++
++    Attributes
++    ----------
++    u : (count,) float array
++        Normalized progress in ``[0, 1]`` (dimensionless).
++    xy : (count, 2) float array
++        Numerically integrated positions in trajectory coordinate units. The
++        first position is the origin.
++    heading_deg : (count,) float array
++        Heading angles in degrees.
++    heading_rate_deg_per_u : (count,) float array
++        Heading rates in degrees per unit normalized progress.
++    tangent : (count, 2) float array
++        Dimensionless unit tangent vectors.
++    arc_length : (count,) float array
++        Theoretical arc lengths in coordinate units, equal to ``trajectory.length * u``.
++    end_pose : Pose2D
++        At ``u=1``: position shape ``(2,)`` in coordinate units, heading in
++        degrees, and heading rate in degrees per unit ``u``.
++    """
+
+     u: FloatArray
+     xy: FloatArray
+@@ -230,6 +268,34 @@ def curvature(trajectory: Trajectory2D, u: ArrayLike) -> FloatArray:
+
+
+ def evaluate_trajectory(trajectory: Trajectory2D, *, count: int = 256) -> TrajectorySample:
++    """Sample a trajectory at uniformly spaced normalized progress values.
++
++    Parameters
++    ----------
++    trajectory : Trajectory2D
++        The curve to evaluate.
++    count : int, optional
++        Number of samples, including both endpoints. Must be at least 2 and an
++        integer value.
++
++    Returns
++    -------
++    TrajectorySample
++        Sample arrays for progress, position, heading, heading rate, unit
++        tangent, theoretical arc length, and the end pose.
++
++    Raises
++    ------
++    ValueError
++        If ``count`` is not an integer of at least 2.
++
++    Notes
++    -----
++    Positions use adaptive numerical integration of the heading-derived
++    tangent. Heading and heading rate are evaluated from the profile, while
++    theoretical sample arc length is exactly ``trajectory.length * u`` up to
++    floating-point arithmetic.
++    """
+     count = _require_integer(count, name="count", minimum=2)
+     u = np.linspace(0.0, 1.0, count)
+     rates = evaluate_heading_rate(trajectory.heading_rate, u)
+@@ -389,10 +455,32 @@ def _cubic_value(
+ def trajectory_to_cubic_path(
+     trajectory: Trajectory2D, *, max_error: float = 1e-4, max_depth: int = 16
+ ) -> CubicPath:
+-    """Approximate a trajectory with cubics using quarter-point error checks.
+-
+-    Each piece is recursively subdivided until the trajectory and cubic differ
+-    by at most ``max_error`` at its quarter, midpoint, and three-quarter points.
++    """Approximate a trajectory with cubic Beziers using sampled error checks.
++
++    Each profile interval is recursively subdivided until the cubic and
++    trajectory positions differ by at most ``max_error`` at local parameters
++    0.25, 0.5, and 0.75. The criterion is sampled and is not a continuous
++    global Hausdorff error bound.
++
++    Parameters
++    ----------
++    trajectory : Trajectory2D
++        The trajectory to approximate.
++    max_error : float, optional
++        Positive coordinate-space error threshold at the three check points.
++    max_depth : int, optional
++        Maximum recursive subdivision depth per profile interval.
++
++    Returns
++    -------
++    CubicPath
++        A chain of cubic segments with the trajectory's starting point.
++
++    Raises
++    ------
++    ValueError
++        If the tolerance is invalid or the sampled criterion cannot be met
++        within ``max_depth``.
+     """
+     if not isfinite(max_error) or max_error <= 0.0:
+         raise ValueError("max_error must be positive and finite")
+diff --git a/planarcurve/transforms.py b/planarcurve/transforms.py
+index 3221193..b253da5 100644
+--- a/planarcurve/transforms.py
++++ b/planarcurve/transforms.py
+@@ -11,7 +11,12 @@ from .types import FloatArray
+
+ @dataclass(frozen=True)
+ class Affine2D:
+-    """2D affine map with row-major linear coefficients and translation."""
++    """2D affine map with row-major linear coefficients and translation.
++
++    Points are mapped as ``[x', y'] = [[m00, m01], [m10, m11]] @ [x, y] + [dx, dy]``.
++    ``apply_vectors()`` uses only the linear matrix. ``compose(other)`` means
++    ``self ∘ other``: apply ``other`` first, then ``self``.
++    """
+
+     m00: float = 1.0
+     m01: float = 0.0
+@@ -131,7 +136,12 @@ class Affine2D:
+
+ @dataclass(frozen=True)
+ class Similarity2D:
+-    """Uniform scale, rotation, and translation in two dimensions."""
++    """Positive uniform scale, rotation in degrees, and translation in 2D.
++
++    Applying the transform scales and rotates a point, then adds ``(dx, dy)``.
++    ``as_affine()`` returns the equivalent affine map. This representation
++    preserves shape because it does not include nonuniform scale or shear.
++    """
+
+     scale: float = 1.0
+     rotation_deg: float = 0.0
+diff --git a/planarcurve/types.py b/planarcurve/types.py
+index 9c5223e..463166f 100644
+--- a/planarcurve/types.py
++++ b/planarcurve/types.py
+@@ -45,10 +45,14 @@ class CubicSegment:
+
+ @dataclass(frozen=True)
+ class CubicPath:
+-    """A cubic chain with an explicit starting point."""
++    """A cubic chain with an explicit starting point.
++
++    Each segment stores its two control points and end point; its start is the
++    path start or previous segment endpoint. ``segments`` accepts a sequence
++    and is normalized to a tuple during construction.
++    """
+
+     start: PointLike
+-    segments: tuple[CubicSegment, ...]
+     segments: Sequence[CubicSegment]
+
+     def __post_init__(self) -> None:

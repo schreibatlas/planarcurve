@@ -1,0 +1,45 @@
+rows:
+- sha: b16ef50faf7885d2fef795930dc8d5fe8a0cdf90
+  inspected: true
+  inspected_paths:
+  - planarcurve/curvature.py
+  - planarcurve/trajectory.py
+  - planarcurve/fitting/trajectory.py
+  - planarcurve/polyline.py
+  - planarcurve/spline.py
+  - planarcurve/svg.py
+  - planarcurve/types.py
+  - tests/test_curvature.py
+  - tests/test_fitting_trajectory.py
+  observed_behavior: >-
+    Removed the legacy curvature compatibility module in favor of the trajectory
+    API; expanded array-like geometry inputs and validation, and added adaptive
+    trajectory position integration and revised fitting controls.
+  public_impact: public
+  decision: accepted
+  target_entry_key: null
+  target_entry_id: null
+  notes: ''
+  stale: false
+- sha: 37e318c1496f9759ca7ec4d89b37ada4c91a1bc8
+  inspected: true
+  inspected_paths:
+  - .readthedocs.yaml
+  - README.md
+  - docs/index.md
+  - docs/quickstart.md
+  - docs/api/index.md
+  - docs/concepts/numerical-contracts.md
+  - docs/guides/fitting.md
+  - planarcurve/fitting/trajectory.py
+  - planarcurve/spline.py
+  observed_behavior: >-
+    Added installation instructions, quickstart, guides, concepts, examples, and
+    API reference documentation, configured Read the Docs builds, and expanded
+    fitter and geometry API documentation.
+  public_impact: docs
+  decision: accepted
+  target_entry_key: null
+  target_entry_id: null
+  notes: ''
+  stale: false

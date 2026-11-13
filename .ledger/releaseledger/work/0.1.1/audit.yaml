@@ -1,0 +1,124 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.1.1
+git_base_ref: v0.1.0
+git_base_sha: 96d8146d246f30ec1b2ef2ca9f32aef4d8f9ea9c
+git_head_ref: HEAD
+git_head_sha: 37e318c1496f9759ca7ec4d89b37ada4c91a1bc8
+git_range: 96d8146d246f30ec1b2ef2ca9f32aef4d8f9ea9c..37e318c1496f9759ca7ec4d89b37ada4c91a1bc8
+commit_count: 2
+rows:
+- sha: b16ef50faf7885d2fef795930dc8d5fe8a0cdf90
+  source_ref: git:b16ef50faf7885d2fef795930dc8d5fe8a0cdf90
+  short_sha: b16ef50
+  changed_paths:
+  - .github/workflows/ci.yml
+  - .github/workflows/release.yml
+  - .pre-commit-config.yaml
+  - MVP_NOTES.md
+  - PLANARCURVE_REVIEW_FOR_CODING_AGENT.md
+  - PLANARCURVE_REVIEW_FOR_CODING_AGENT.md:Zone.Identifier
+  - README.md
+  - examples/README.md
+  - examples/bezier_basics.py
+  - examples/curvature_gallery.py
+  - examples/fit_polyline_to_spline.py
+  - examples/fit_shared_trajectory.py
+  - examples/spline_to_bezier.py
+  - examples/svg_pipeline.py
+  - examples/trajectory_gallery.py
+  - examples/trajectory_gallery.svg
+  - planarcurve/__init__.py
+  - planarcurve/bezier.py
+  - planarcurve/curvature.py
+  - planarcurve/fitting/parameters.py
+  - planarcurve/fitting/policy.py
+  - planarcurve/fitting/spline.py
+  - planarcurve/fitting/trajectory.py
+  - planarcurve/polyline.py
+  - planarcurve/spline.py
+  - planarcurve/svg.py
+  - planarcurve/trajectory.py
+  - planarcurve/transforms.py
+  - planarcurve/types.py
+  - tests/test_curvature.py
+  - tests/test_examples.py
+  - tests/test_fitting_parameters.py
+  - tests/test_fitting_spline.py
+  - tests/test_fitting_trajectory.py
+  - tests/test_polyline_bezier.py
+  - tests/test_spline.py
+  - tests/test_svg.py
+  - tools/parity_with_inkgrammar.py
+  stats:
+    files_changed: 38
+    insertions: 1244
+    deletions: 2665
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  stale: false
+  evidence_subject: 'feat: code refactoring and fixes'
+- sha: 37e318c1496f9759ca7ec4d89b37ada4c91a1bc8
+  source_ref: git:37e318c1496f9759ca7ec4d89b37ada4c91a1bc8
+  short_sha: 37e318c
+  changed_paths:
+  - .github/workflows/ci.yml
+  - .readthedocs.yaml
+  - README.md
+  - docs/Makefile
+  - docs/api/bezier.md
+  - docs/api/fitting.md
+  - docs/api/index.md
+  - docs/api/polyline.md
+  - docs/api/spline.md
+  - docs/api/svg.md
+  - docs/api/trajectory.md
+  - docs/api/transforms.md
+  - docs/api/types.md
+  - docs/concepts/coordinates-and-parameters.md
+  - docs/concepts/index.md
+  - docs/concepts/numerical-contracts.md
+  - docs/concepts/splines.md
+  - docs/concepts/trajectories.md
+  - docs/conf.py
+  - docs/development.md
+  - docs/examples.md
+  - docs/guides/bezier.md
+  - docs/guides/fitting.md
+  - docs/guides/index.md
+  - docs/guides/polylines.md
+  - docs/guides/splines.md
+  - docs/guides/svg.md
+  - docs/guides/trajectories.md
+  - docs/guides/transforms.md
+  - docs/index.md
+  - docs/installation.md
+  - docs/make.bat
+  - docs/make.py
+  - docs/quickstart.md
+  - docs/requirements.txt
+  - planarcurve/fitting/spline.py
+  - planarcurve/fitting/trajectory.py
+  - planarcurve/polyline.py
+  - planarcurve/spline.py
+  - planarcurve/svg.py
+  - planarcurve/trajectory.py
+  - planarcurve/transforms.py
+  - planarcurve/types.py
+  stats:
+    files_changed: 43
+    insertions: 1597
+    deletions: 63
+  inspected: false
+  inspected_paths: []
+  observed_behavior: ''
+  public_impact: unknown
+  decision: needs_review
+  stale: false
+  evidence_subject: 'feat: add docs'
