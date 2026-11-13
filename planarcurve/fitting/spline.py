@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 try:
     from scipy.sparse import csr_array, eye, vstack
@@ -14,18 +15,23 @@ except ImportError as exc:  # pragma: no cover - optional fitting extra
     ) from exc
 
 from ..spline import BSplineCurve, control_roughness_matrix, spline_design_matrix
+from ..types import _require_integer
 from .policy import SplineEndpointPolicy
 
 
 @dataclass(frozen=True)
 class SplineObservation:
-    u: np.ndarray
-    xy: np.ndarray
-    weight: np.ndarray | None = None
+    """Observed spline samples with optional per-point weights."""
+
+    u: ArrayLike
+    xy: ArrayLike
+    weight: ArrayLike | None = None
 
 
 @dataclass(frozen=True)
 class SplineFitOptions:
+    """Regularization, robust-fit, and endpoint settings for spline fitting."""
+
     smoothness: float = 0.02
     seed_weight: float = 0.01
     robust_scale: float = 1.5
@@ -41,16 +47,17 @@ class SplineFitOptions:
             raise ValueError("spline regularization weights must be nonnegative")
         if self.robust_scale <= 0.0 or self.endpoint_sigma <= 0.0:
             raise ValueError("robust scale and endpoint sigma must be positive")
-        if (
-            isinstance(self.irls_iterations, (bool, np.bool_))
-            or not isinstance(self.irls_iterations, (int, np.integer))
-            or self.irls_iterations < 1
-        ):
-            raise ValueError("IRLS iteration count must be at least one")
+        object.__setattr__(
+            self,
+            "irls_iterations",
+            _require_integer(self.irls_iterations, name="irls_iterations", minimum=1),
+        )
 
 
 @dataclass(frozen=True)
 class SplineFitResult:
+    """Fitted shared spline and its aggregate residual summary."""
+
     curve: BSplineCurve
     residual_rms: float
     iterations: int
@@ -122,7 +129,7 @@ def fit_spline_control_points(
     basis: BSplineCurve,
     observations: Sequence[SplineObservation],
     *,
-    seed_control_points: np.ndarray | None = None,
+    seed_control_points: ArrayLike | None = None,
     options: SplineFitOptions | None = None,
 ) -> SplineFitResult:
     """Fit shared B-spline controls with sparse weighted least squares and IRLS."""
@@ -137,14 +144,10 @@ def fit_spline_control_points(
     if seed.shape != (control_count, 2) or not np.isfinite(seed).all():
         raise ValueError("seed control points must be finite and match the spline basis")
 
-    data_matrix = vstack(
-        [spline_design_matrix(u, basis) for u in parameter_arrays], format="csr"
-    )
+    data_matrix = vstack([spline_design_matrix(u, basis) for u in parameter_arrays], format="csr")
     roughness = control_roughness_matrix(control_count, order=2)
     roughness_rows = np.sqrt(options.smoothness) * roughness
     seed_rows = np.sqrt(options.seed_weight) * eye(control_count, format="csr")
-    endpoint_rows = []
-    endpoint_values = []
     endpoint_rows = []
     endpoint_values = []
     for index, policy in (
@@ -152,9 +155,7 @@ def fit_spline_control_points(
         (-1, options.endpoint_policy.end),
     ):
         if policy == "anchored":
-            endpoint_rows.append(
-                eye(control_count, format="csr")[index] / options.endpoint_sigma
-            )
+            endpoint_rows.append(eye(control_count, format="csr")[index] / options.endpoint_sigma)
             endpoint_values.append(seed[index] / options.endpoint_sigma)
     fixed_indices = np.asarray(
         [
@@ -200,9 +201,7 @@ def fit_spline_control_points(
             ]
         )
         residuals = np.linalg.norm(data_matrix @ control_points - observed_xy, axis=1)
-        robust_weights = np.minimum(
-            1.0, options.robust_scale / np.maximum(residuals, 1e-12)
-        )
+        robust_weights = np.minimum(1.0, options.robust_scale / np.maximum(residuals, 1e-12))
 
     residuals = np.linalg.norm(data_matrix @ control_points - observed_xy, axis=1)
     curve = BSplineCurve(

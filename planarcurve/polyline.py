@@ -3,16 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import ArrayLike
+
+from .types import FloatArray, _require_integer
 
 
-def _points(values: np.ndarray) -> np.ndarray:
+def _points(values: ArrayLike) -> FloatArray:
     points = np.asarray(values, dtype=float)
     if points.ndim != 2 or points.shape[1] != 2 or not np.isfinite(points).all():
         raise ValueError("points must be a finite array with shape (n, 2)")
     return points
 
 
-def cumulative_arclength(points: np.ndarray) -> np.ndarray:
+def cumulative_arclength(points: ArrayLike) -> FloatArray:
+    """Return cumulative chord lengths at each vertex."""
     values = _points(points)
     if len(values) == 0:
         return np.empty(0, dtype=float)
@@ -20,22 +24,24 @@ def cumulative_arclength(points: np.ndarray) -> np.ndarray:
     return np.concatenate(([0.0], np.cumsum(lengths)))
 
 
-def normalized_arclength(points: np.ndarray) -> np.ndarray:
+def normalized_arclength(points: ArrayLike) -> FloatArray:
+    """Return cumulative chord lengths normalized to [0, 1]."""
     arc = cumulative_arclength(points)
     if len(arc) < 2 or arc[-1] <= 0.0:
         raise ValueError("normalized arclength requires a nonzero polyline")
     return arc / arc[-1]
 
 
-def polyline_length(points: np.ndarray) -> float:
+def polyline_length(points: ArrayLike) -> float:
+    """Return the total chord length of a polyline."""
     arc = cumulative_arclength(points)
     return 0.0 if arc.size == 0 else float(arc[-1])
 
 
-def resample_polyline_by_arclength(points: np.ndarray, count: int) -> np.ndarray:
+def resample_polyline_by_arclength(points: ArrayLike, count: int) -> FloatArray:
+    """Sample a polyline uniformly by cumulative chord length."""
     values = _points(points)
-    if isinstance(count, bool) or count < 2:
-        raise ValueError("count must be at least two")
+    count = _require_integer(count, name="count", minimum=2)
     arc = cumulative_arclength(values)
     keep = np.concatenate(([True], np.diff(arc) > 1e-12)) if arc.size else np.empty(0, bool)
     arc = arc[keep]
@@ -48,7 +54,8 @@ def resample_polyline_by_arclength(points: np.ndarray, count: int) -> np.ndarray
     )
 
 
-def unit_tangents(points: np.ndarray) -> np.ndarray:
+def unit_tangents(points: ArrayLike) -> FloatArray:
+    """Estimate unit tangents at vertices using neighboring points."""
     values = _points(points)
     if len(values) < 2:
         raise ValueError("at least two points are required")
@@ -66,7 +73,8 @@ def unit_tangents(points: np.ndarray) -> np.ndarray:
     )
 
 
-def bounding_box(points: np.ndarray) -> tuple[float, float, float, float]:
+def bounding_box(points: ArrayLike) -> tuple[float, float, float, float]:
+    """Return the (xmin, ymin, xmax, ymax) bounds of a polyline."""
     values = _points(points)
     if len(values) == 0:
         raise ValueError("cannot compute a bounding box for no points")
@@ -80,14 +88,17 @@ def bounding_box(points: np.ndarray) -> tuple[float, float, float, float]:
 
 @dataclass(frozen=True)
 class PolylineProjection:
-    point: np.ndarray
-    distance: np.ndarray
+    """Nearest-point projection results for an array of query points."""
+
+    point: FloatArray
+    distance: FloatArray
     segment_index: np.ndarray
-    segment_t: np.ndarray
-    arc_length: np.ndarray
+    segment_t: FloatArray
+    arc_length: FloatArray
 
 
-def project_points_to_polyline(points: np.ndarray, polyline: np.ndarray) -> PolylineProjection:
+def project_points_to_polyline(points: ArrayLike, polyline: ArrayLike) -> PolylineProjection:
+    """Project query points onto all segments and retain each nearest result."""
     queries = _points(points)
     vertices = _points(polyline)
     if len(vertices) < 2:
@@ -118,34 +129,26 @@ def project_points_to_polyline(points: np.ndarray, polyline: np.ndarray) -> Poly
     return PolylineProjection(projected, distance, segment_index, segment_t, arc_length)
 
 
-def distance_to_polyline(points: np.ndarray, polyline: np.ndarray) -> np.ndarray:
+def distance_to_polyline(points: ArrayLike, polyline: ArrayLike) -> FloatArray:
+    """Return the nearest segment distance for each query point."""
     return project_points_to_polyline(points, polyline).distance
 
 
-
-
-def symmetric_polyline_distance(
-    a: np.ndarray, b: np.ndarray, *, samples: int = 64
-) -> float:
+def symmetric_polyline_distance(a: ArrayLike, b: ArrayLike, *, samples: int = 64) -> float:
     """Return the mean bidirectional distance between two polylines.
 
     Both polylines are sampled uniformly by arc length. The result is an
     average Euclidean distance in the coordinate units of the input arrays.
     """
-    if isinstance(samples, (bool, np.bool_)) or not isinstance(samples, (int, np.integer)):
-        raise ValueError("samples must be an integer of at least two")
-    if samples < 2:
-        raise ValueError("samples must be an integer of at least two")
-    sampled_a = resample_polyline_by_arclength(a, int(samples))
+    samples = _require_integer(samples, name="samples", minimum=2)
+    sampled_a = resample_polyline_by_arclength(a, samples)
     sampled_b = resample_polyline_by_arclength(b, int(samples))
     a_to_b = distance_to_polyline(sampled_a, sampled_b)
     b_to_a = distance_to_polyline(sampled_b, sampled_a)
     return 0.5 * float(a_to_b.mean() + b_to_a.mean())
 
 
-def mean_squared_turn_angle(
-    points: np.ndarray, *, samples: int | None = None
-) -> float:
+def mean_squared_turn_angle(points: ArrayLike, *, samples: int | None = None) -> float:
     """Return mean squared adjacent-segment turn angle in radians squared.
 
     When ``samples`` is given, the polyline is first resampled uniformly by
@@ -154,11 +157,8 @@ def mean_squared_turn_angle(
     """
     values = _points(points)
     if samples is not None:
-        if isinstance(samples, (bool, np.bool_)) or not isinstance(samples, (int, np.integer)):
-            raise ValueError("samples must be an integer of at least two")
-        if samples < 2:
-            raise ValueError("samples must be an integer of at least two")
-        values = resample_polyline_by_arclength(values, int(samples))
+        samples = _require_integer(samples, name="samples", minimum=2)
+        values = resample_polyline_by_arclength(values, samples)
     vectors = np.diff(values, axis=0)
     lengths = np.linalg.norm(vectors, axis=1)
     valid = lengths > 1e-12
@@ -170,7 +170,9 @@ def mean_squared_turn_angle(
     turns = np.arccos(np.clip(np.sum(directions[:-1] * directions[1:], axis=1), -1.0, 1.0))
     return float(np.mean(turns**2))
 
-def closest_point_on_polyline(point: np.ndarray, polyline: np.ndarray) -> np.ndarray:
+
+def closest_point_on_polyline(point: ArrayLike, polyline: ArrayLike) -> FloatArray:
+    """Return the nearest point on a polyline to one query point."""
     query = np.asarray(point, dtype=float)
     if query.shape != (2,):
         raise ValueError("point must have shape (2,)")

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import ArrayLike
+
+from ..types import FloatArray
 
 
 def ordered_positions_from_logits(
-    logits: np.ndarray,
+    logits: ArrayLike,
     *,
     min_spacing: float = 0.0,
     start: float = 0.0,
     end: float = 1.0,
-) -> np.ndarray:
+) -> FloatArray:
     """Decode interval logits into strictly ordered positions in ``(start, end)``."""
     values = np.asarray(logits, dtype=float)
     if values.ndim != 1 or not np.isfinite(values).all():
@@ -34,12 +37,12 @@ def ordered_positions_from_logits(
 
 
 def ordered_positions_to_logits(
-    positions: np.ndarray,
+    positions: ArrayLike,
     *,
     min_spacing: float = 0.0,
     start: float = 0.0,
     end: float = 1.0,
-) -> np.ndarray:
+) -> FloatArray:
     """Encode ordered positions as interval logits, up to a constant offset."""
     values = np.asarray(positions, dtype=float)
     if values.ndim != 1 or not np.isfinite(values).all():

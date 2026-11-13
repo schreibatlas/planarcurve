@@ -5,6 +5,7 @@ import pytest
 
 from planarcurve.fitting.trajectory import (
     TrajectoryFitOptions,
+    _ProfileCodec,
     estimate_heading_rate,
     estimate_polyline_heading,
     fit_shared_trajectory_profile,
@@ -64,7 +65,8 @@ def test_sampled_curve_helpers_validate_and_estimate_heading():
 
 def test_single_trajectory_fit_recovers_noisy_synthetic_shape():
     target = transformed_points(
-        true_trajectory(), Similarity2D(scale=2.0, rotation_deg=0.0, dx=3.0, dy=-1.0),
+        true_trajectory(),
+        Similarity2D(scale=2.0, rotation_deg=0.0, dx=3.0, dy=-1.0),
         seed=7,
         noise=0.002,
     )
@@ -78,6 +80,9 @@ def test_single_trajectory_fit_recovers_noisy_synthetic_shape():
     assert result.metrics["endpoint_tangent_error_deg"] <= 10.0
     assert result.metrics["total_turn_error_deg"] <= 5.0
     assert result.transform.scale == pytest.approx(2.0, rel=0.08)
+
+    assert result.trajectory.start_heading_deg == 0.0
+    assert result.transform.rotation_deg == pytest.approx(40.0, abs=10.0)
 
 
 def test_shared_profile_fits_transformed_occurrences():
@@ -96,6 +101,15 @@ def test_shared_profile_fits_transformed_occurrences():
         TrajectoryFitOptions(change_count=3, restarts=0, seed=0, max_nfev=300),
     )
     assert result.success
+    assert result.trajectory.start_heading_deg == 0.0
+    pointwise_errors = []
+    fitted_xy = evaluate_trajectory(result.trajectory, count=64).xy
+    for occurrence, transform in zip(occurrences, result.transforms, strict=True):
+        target_points = resample_by_arclength(occurrence, samples=64)
+        pointwise_errors.extend(np.linalg.norm(transform.apply(fitted_xy) - target_points, axis=1))
+    assert result.metrics["p95_position_error"] == pytest.approx(
+        np.percentile(pointwise_errors, 95)
+    )
     assert len(result.transforms) == len(occurrences)
     assert abs(trajectory_total_turn(result.trajectory) - trajectory_total_turn(trajectory)) < 12.0
     assert result.metrics["median_position_error"] < 0.02
@@ -108,3 +122,81 @@ def test_trajectory_fit_options_reject_invalid_configuration():
         TrajectoryFitOptions(change_count=-1)
     with pytest.raises(ValueError, match="weights"):
         TrajectoryFitOptions(change_count=1, position_weight=-1.0)
+
+    with pytest.raises(ValueError, match="samples"):
+        TrajectoryFitOptions(change_count=1, samples=3.5)
+    with pytest.raises(ValueError, match="restarts"):
+        TrajectoryFitOptions(change_count=1, restarts=1.5)
+    with pytest.raises(ValueError, match="max_nfev"):
+        TrajectoryFitOptions(change_count=1, max_nfev=2.5)
+    with pytest.raises(ValueError, match="change_count"):
+        TrajectoryFitOptions(change_count=1.5)
+    with pytest.raises(ValueError, match="smoothing_window"):
+        TrajectoryFitOptions(change_count=1, smoothing_window=4.5)
+
+
+def test_even_smoothing_windows_preserve_length_and_one_is_unsmoothed():
+    points = np.column_stack((np.linspace(0.0, 1.0, 10), np.linspace(0.0, 1.0, 10) ** 2))
+    headings = estimate_polyline_heading(points, smooth_window=4)
+    unsmoothed = estimate_polyline_heading(points, smooth_window=1)
+    rates = estimate_heading_rate(np.linspace(0.0, 1.0, 10), headings, smooth_window=4)
+
+    assert headings.shape == (10,)
+    assert rates.shape == (10,)
+    np.testing.assert_allclose(
+        unsmoothed,
+        np.rad2deg(
+            np.unwrap(
+                np.arctan2(np.gradient(points, axis=0)[:, 1], np.gradient(points, axis=0)[:, 0])
+            )
+        ),
+    )
+
+
+def test_change_position_initialization_stays_strictly_inside_interval():
+    positions = initialize_change_positions(np.array([100.0, 0.0, 0.0, 0.0, 0.0]), 1)
+
+    assert positions[0] > 0.0
+    assert positions[-1] < 1.0
+    assert np.all(np.diff(positions) >= 0.02)
+
+
+def test_profile_codec_uses_only_identifiable_position_logits():
+    for change_count in (0, 2):
+        codec = _ProfileCodec(TrajectoryFitOptions(change_count=change_count))
+        positions = np.linspace(0.3, 0.7, change_count)
+        rates = np.linspace(-20.0, 20.0, change_count + 2)
+        encoded = codec.encode(positions, rates)
+        decoded_positions, decoded_rates = codec.decode(encoded)
+
+        assert encoded.size == change_count + change_count + 2
+        np.testing.assert_allclose(decoded_positions, positions)
+        np.testing.assert_allclose(decoded_rates, rates)
+
+
+def test_fitted_profile_is_invariant_to_coordinate_scale_and_rotation():
+    base_points = evaluate_trajectory(true_trajectory(), count=257).xy
+    options = TrajectoryFitOptions(change_count=3, samples=48, restarts=0, max_nfev=150)
+    signatures = []
+    for scale, rotation in ((0.01, 0.0), (1.0, 35.0), (100.0, 120.0), (10_000.0, -70.0)):
+        points = Similarity2D(
+            scale=scale, rotation_deg=rotation, dx=3.0 * scale, dy=-2.0 * scale
+        ).apply(base_points)
+        result = fit_trajectory(points, options)
+        assert result.trajectory.start_heading_deg == 0.0
+        signatures.append(
+            np.array(
+                [
+                    *(change.at for change in result.trajectory.heading_rate.changes),
+                    result.trajectory.heading_rate.start_rate_deg_per_u,
+                    *(
+                        change.heading_rate_deg_per_u
+                        for change in result.trajectory.heading_rate.changes
+                    ),
+                    result.trajectory.heading_rate.end_rate_deg_per_u,
+                ]
+            )
+        )
+
+    for signature in signatures[1:]:
+        np.testing.assert_allclose(signature, signatures[0], rtol=0.1, atol=3.0)

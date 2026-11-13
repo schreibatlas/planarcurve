@@ -8,8 +8,8 @@ from typing import Literal
 class SplineEndpointPolicy:
     """Endpoint constraints used by spline fitting, not by spline geometry."""
 
-    start: Literal["locked", "free", "anchored"] = "locked"
-    end: Literal["locked", "free", "anchored"] = "locked"
+    start: Literal["locked", "free", "anchored"] = "free"
+    end: Literal["locked", "free", "anchored"] = "free"
 
     def __post_init__(self) -> None:
         allowed = {"locked", "free", "anchored"}

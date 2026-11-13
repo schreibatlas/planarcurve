@@ -11,6 +11,7 @@ from planarcurve.trajectory import (
     evaluate_heading,
     evaluate_heading_rate,
     evaluate_trajectory,
+    evaluate_trajectory_at,
     integrated_heading_rate,
     sample_trajectory_by_arclength,
     trajectory_to_cubic_path,
@@ -126,8 +127,8 @@ def test_unconstrained_profile_accepts_close_knots_and_large_finite_rates():
 
 def test_arclength_resampling_and_cubic_path_are_deterministic():
     t = trajectory()
-    first = sample_trajectory_by_arclength(t, 41, integration_count=257)
-    second = sample_trajectory_by_arclength(t, 41, integration_count=257)
+    first = sample_trajectory_by_arclength(t, 41, tolerance=1e-10)
+    second = sample_trajectory_by_arclength(t, 41, tolerance=1e-10)
     np.testing.assert_array_equal(first, second)
     path = trajectory_to_cubic_path(t, max_error=1e-4)
     assert path.start == pytest.approx(tuple(evaluate_trajectory(t, count=2).xy[0]))
@@ -138,7 +139,6 @@ def test_arclength_resampling_and_cubic_path_are_deterministic():
     assert beziers[-1].p3 == pytest.approx(
         tuple(evaluate_trajectory(t, count=257).xy[-1]), abs=2e-6
     )
-
 
 
 def test_cubic_path_conversion_respects_geometric_tolerance():
@@ -154,3 +154,42 @@ def test_cubic_path_conversion_respects_geometric_tolerance():
             one = 1.0 - u
             point = one**3 * p0 + 3 * one**2 * u * p1 + 3 * one * u**2 * p2 + u**3 * p3
             assert abs(np.linalg.norm(point - center) - radius) < 2e-4
+
+
+def test_trajectory_count_and_depth_parameters_reject_floats():
+    t = trajectory()
+
+    with pytest.raises(ValueError, match="count"):
+        evaluate_trajectory(t, count=3.5)
+    with pytest.raises(ValueError, match="count"):
+        sample_trajectory_by_arclength(t, 3.5)
+    with pytest.raises(ValueError, match="max_depth"):
+        trajectory_to_cubic_path(t, max_depth=2.5)
+
+
+def test_trajectory_arc_length_is_exactly_length_times_u():
+    t = trajectory(length=1.7)
+    sample = evaluate_trajectory(t, count=17)
+
+    np.testing.assert_array_equal(sample.arc_length, t.length * sample.u)
+    assert sample.arc_length[-1] == t.length
+    np.testing.assert_allclose(np.diff(sample.arc_length), np.full(16, t.length / 16))
+
+
+def test_position_evaluation_is_independent_of_query_batch():
+    t = trajectory()
+    short_query = np.array([0.17, 0.37, 0.81])
+    extended_query = np.array([0.01, 0.17, 0.25, 0.37, 0.5, 0.81, 0.97])
+    short_xy, short_heading = evaluate_trajectory_at(t, short_query)
+    extended_xy, extended_heading = evaluate_trajectory_at(t, extended_query)
+
+    np.testing.assert_array_equal(short_xy[[1]], extended_xy[[3]])
+    np.testing.assert_array_equal(short_heading[[1]], extended_heading[[3]])
+
+
+def test_arc_length_sampling_uses_uniform_theoretical_progress():
+    t = trajectory(length=2.0)
+    u = np.linspace(0.0, 1.0, 11)
+    expected, _ = evaluate_trajectory_at(t, u)
+
+    np.testing.assert_array_equal(sample_trajectory_by_arclength(t, len(u)), expected)

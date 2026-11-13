@@ -33,7 +33,6 @@ def test_position_parameterization_is_generic_without_spacing_policy():
     assert positions[0] > 0.0 and positions[-1] < 1.0
 
 
-
 def test_extreme_position_logits_stay_strictly_inside_the_interval():
     positions = ordered_positions_from_logits(np.array([-1000.0, 1000.0, -1000.0]))
     assert 0.0 < positions[0] < positions[1] < 1.0

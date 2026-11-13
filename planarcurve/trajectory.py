@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from math import isfinite
 from typing import Literal
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-from .types import CubicPath, CubicSegment
+from .types import CubicPath, CubicSegment, FloatArray, _require_integer
 
 
 @dataclass(frozen=True)
 class HeadingRateChange:
+    """One heading-rate knot at normalized progress ``at``."""
+
     at: float
     heading_rate_deg_per_u: float
 
@@ -25,6 +29,8 @@ class HeadingRateChange:
 
 @dataclass(frozen=True)
 class HeadingRateProfile:
+    """Piecewise heading-rate profile over normalized progress."""
+
     start_rate_deg_per_u: float
     end_rate_deg_per_u: float
     changes: tuple[HeadingRateChange, ...] = ()
@@ -39,14 +45,15 @@ class HeadingRateProfile:
         object.__setattr__(self, "changes", changes)
         positions = [change.at for change in changes]
         if any(
-            current <= previous
-            for previous, current in zip(positions, positions[1:], strict=False)
+            current <= previous for previous, current in zip(positions, positions[1:], strict=False)
         ):
             raise ValueError("heading-rate changes must be strictly ordered")
 
 
 @dataclass(frozen=True)
 class Trajectory2D:
+    """Planar curve with constant speed and a piecewise heading-rate profile."""
+
     length: float
     start_heading_deg: float
     heading_rate: HeadingRateProfile
@@ -58,34 +65,40 @@ class Trajectory2D:
             raise ValueError("start_heading_deg must be finite")
 
     def evaluate(self, *, count: int = 256) -> TrajectorySample:
+        """Evaluate the trajectory at uniformly spaced normalized progress."""
         return evaluate_trajectory(self, count=count)
 
 
 @dataclass(frozen=True)
 class Pose2D:
-    position: np.ndarray
+    """Position, heading, and heading rate at one trajectory endpoint."""
+
+    position: FloatArray
     heading_deg: float
     heading_rate_deg_per_u: float
 
 
 @dataclass(frozen=True)
 class TrajectorySample:
-    u: np.ndarray
-    xy: np.ndarray
-    heading_deg: np.ndarray
-    heading_rate_deg_per_u: np.ndarray
-    tangent: np.ndarray
-    arc_length: np.ndarray
+    """Sampled trajectory fields at normalized progress values."""
+
+    u: FloatArray
+    xy: FloatArray
+    heading_deg: FloatArray
+    heading_rate_deg_per_u: FloatArray
+    tangent: FloatArray
+    arc_length: FloatArray
     end_pose: Pose2D
 
 
 @dataclass(frozen=True)
 class _ProfileKnots:
-    positions: np.ndarray
-    rates: np.ndarray
-    slopes: np.ndarray
+    positions: FloatArray
+    rates: FloatArray
+    slopes: FloatArray
 
 
+@lru_cache(maxsize=128)
 def _profile_knots(profile: HeadingRateProfile) -> _ProfileKnots:
     positions = np.asarray([0.0, *(change.at for change in profile.changes), 1.0])
     rates = np.asarray(
@@ -98,7 +111,7 @@ def _profile_knots(profile: HeadingRateProfile) -> _ProfileKnots:
     return _ProfileKnots(positions, rates, _hermite_slopes(positions, rates))
 
 
-def _hermite_slopes(knots: np.ndarray, values: np.ndarray) -> np.ndarray:
+def _hermite_slopes(knots: FloatArray, values: FloatArray) -> FloatArray:
     deltas = np.diff(values) / np.diff(knots)
     slopes = np.zeros(knots.size)
     if knots.size == 2:
@@ -118,7 +131,7 @@ def _hermite_slopes(knots: np.ndarray, values: np.ndarray) -> np.ndarray:
     return slopes
 
 
-def _endpoint_slope(knots: np.ndarray, deltas: np.ndarray, index: int) -> float:
+def _endpoint_slope(knots: FloatArray, deltas: FloatArray, index: int) -> float:
     if knots.size == 2:
         return float(deltas[0])
     if index == 0:
@@ -135,7 +148,7 @@ def _endpoint_slope(knots: np.ndarray, deltas: np.ndarray, index: int) -> float:
     return float(slope)
 
 
-def _validated_parameters(u: np.ndarray) -> np.ndarray:
+def _validated_parameters(u: ArrayLike) -> FloatArray:
     values = np.asarray(u, dtype=float)
     if values.ndim != 1 or not np.isfinite(values).all():
         raise ValueError("u must be a finite 1-D array")
@@ -144,11 +157,11 @@ def _validated_parameters(u: np.ndarray) -> np.ndarray:
     return values
 
 
-def _span_indices(knots: np.ndarray, u: np.ndarray) -> np.ndarray:
+def _span_indices(knots: FloatArray, u: FloatArray) -> np.ndarray:
     return np.clip(np.searchsorted(knots, u, side="right") - 1, 0, knots.size - 2)
 
 
-def evaluate_heading_rate(profile: HeadingRateProfile, u: np.ndarray) -> np.ndarray:
+def evaluate_heading_rate(profile: HeadingRateProfile, u: ArrayLike) -> FloatArray:
     """Evaluate d(heading in degrees)/du at normalized progress ``u``."""
     values = _validated_parameters(u)
     profile_data = _profile_knots(profile)
@@ -173,7 +186,7 @@ def evaluate_heading_rate(profile: HeadingRateProfile, u: np.ndarray) -> np.ndar
     )
 
 
-def integrated_heading_rate(profile: HeadingRateProfile, u: np.ndarray) -> np.ndarray:
+def integrated_heading_rate(profile: HeadingRateProfile, u: ArrayLike) -> FloatArray:
     """Return the exact integral of heading rate from zero to each ``u`` value."""
     values = _validated_parameters(u)
     data = _profile_knots(profile)
@@ -184,8 +197,7 @@ def integrated_heading_rate(profile: HeadingRateProfile, u: np.ndarray) -> np.nd
         prefix[1:] = np.cumsum(spans * (rates[:-1] + rates[1:]) * 0.5)
     else:
         prefix[1:] = np.cumsum(
-            spans * (rates[:-1] + rates[1:]) * 0.5
-            + spans**2 * (slopes[:-1] - slopes[1:]) / 12.0
+            spans * (rates[:-1] + rates[1:]) * 0.5 + spans**2 * (slopes[:-1] - slopes[1:]) / 12.0
         )
 
     indices = _span_indices(knots, values)
@@ -200,87 +212,68 @@ def integrated_heading_rate(profile: HeadingRateProfile, u: np.ndarray) -> np.nd
     h10 = 0.25 * t4 - (2.0 / 3.0) * t3 + 0.5 * t2
     h01 = -0.5 * t4 + t3
     h11 = 0.25 * t4 - (1.0 / 3.0) * t3
-    local = (
-        h * (h00 * rates[indices] + h01 * rates[indices + 1])
-        + h**2 * (h10 * slopes[indices] + h11 * slopes[indices + 1])
+    local = h * (h00 * rates[indices] + h01 * rates[indices + 1]) + h**2 * (
+        h10 * slopes[indices] + h11 * slopes[indices + 1]
     )
     return prefix[indices] + local
 
 
-def evaluate_heading(trajectory: Trajectory2D, u: np.ndarray) -> np.ndarray:
+def evaluate_heading(trajectory: Trajectory2D, u: ArrayLike) -> FloatArray:
     """Evaluate heading in degrees, independent of the other requested samples."""
     return trajectory.start_heading_deg + integrated_heading_rate(trajectory.heading_rate, u)
 
 
-def curvature(trajectory: Trajectory2D, u: np.ndarray) -> np.ndarray:
+def curvature(trajectory: Trajectory2D, u: ArrayLike) -> FloatArray:
     """Evaluate signed geometric curvature in inverse length units."""
     rates = evaluate_heading_rate(trajectory.heading_rate, u)
     return np.deg2rad(rates) / trajectory.length
 
 
 def evaluate_trajectory(trajectory: Trajectory2D, *, count: int = 256) -> TrajectorySample:
-    if isinstance(count, bool) or count < 2:
-        raise ValueError("count must be at least 2")
+    count = _require_integer(count, name="count", minimum=2)
     u = np.linspace(0.0, 1.0, count)
     rates = evaluate_heading_rate(trajectory.heading_rate, u)
     heading_deg = evaluate_heading(trajectory, u)
     tangent = np.column_stack((np.cos(np.deg2rad(heading_deg)), np.sin(np.deg2rad(heading_deg))))
-    xy = np.zeros((count, 2), dtype=float)
-    xy[1:] = trajectory.length * np.cumsum(
-        0.5 * (tangent[:-1] + tangent[1:]) * np.diff(u)[:, None], axis=0
-    )
-    arc_length = np.zeros(count, dtype=float)
-    arc_length[1:] = np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))
+    xy = _trajectory_positions_at(trajectory, u)
+    arc_length = trajectory.length * u
     end_pose = Pose2D(xy[-1].copy(), float(heading_deg[-1]), float(rates[-1]))
     return TrajectorySample(u, xy, heading_deg, rates, tangent, arc_length, end_pose)
 
 
 def trajectory_end_pose(trajectory: Trajectory2D, *, count: int = 256) -> Pose2D:
+    """Return the trajectory endpoint pose."""
     return evaluate_trajectory(trajectory, count=count).end_pose
 
 
 def trajectory_total_turn(trajectory: Trajectory2D) -> float:
+    """Return the total signed heading change in degrees."""
     return float(integrated_heading_rate(trajectory.heading_rate, np.array([1.0]))[0])
 
 
 def sample_trajectory_by_arclength(
-    trajectory: Trajectory2D, count: int, *, integration_count: int = 256
-) -> np.ndarray:
-    if isinstance(count, bool) or count < 2:
-        raise ValueError("sample count must be at least two")
-    sample = evaluate_trajectory(trajectory, count=integration_count)
-    targets = np.linspace(0.0, sample.arc_length[-1], count)
-    return np.column_stack(
-        (
-            np.interp(targets, sample.arc_length, sample.xy[:, 0]),
-            np.interp(targets, sample.arc_length, sample.xy[:, 1]),
-        )
-    )
+    trajectory: Trajectory2D, count: int, *, tolerance: float = 1e-10
+) -> FloatArray:
+    """Sample positions uniformly in theoretical arc length."""
+    count = _require_integer(count, name="count", minimum=2)
+    u = np.linspace(0.0, 1.0, count)
+    return _trajectory_positions_at(trajectory, u, tolerance=tolerance)
 
 
 def evaluate_trajectory_at(
-    trajectory: Trajectory2D, u: np.ndarray, *, base_count: int = 257
-) -> tuple[np.ndarray, np.ndarray]:
+    trajectory: Trajectory2D, u: ArrayLike, *, tolerance: float = 1e-10
+) -> tuple[FloatArray, FloatArray]:
+    """Evaluate positions and headings at arbitrary normalized progress values."""
     values = _validated_parameters(u)
-    if isinstance(base_count, bool) or base_count < 2:
-        raise ValueError("base_count must be at least 2")
-    grid = np.unique(np.concatenate([np.linspace(0.0, 1.0, base_count), values]))
-    heading = evaluate_heading(trajectory, grid)
-    tangent = np.column_stack((np.cos(np.deg2rad(heading)), np.sin(np.deg2rad(heading))))
-    xy = np.zeros((grid.size, 2), dtype=float)
-    xy[1:] = trajectory.length * np.cumsum(
-        0.5 * (tangent[:-1] + tangent[1:]) * np.diff(grid)[:, None], axis=0
-    )
-    indices = np.searchsorted(grid, values)
-    return xy[indices], heading[indices]
+    heading = evaluate_heading(trajectory, values)
+    xy = _trajectory_positions_at(trajectory, values, tolerance=tolerance)
+    return xy, heading
 
 
 _GAUSS_NODES, _GAUSS_WEIGHTS = np.polynomial.legendre.leggauss(8)
 
 
-def _gauss_tangent_integral(
-    trajectory: Trajectory2D, low: float, high: float
-) -> np.ndarray:
+def _gauss_tangent_integral(trajectory: Trajectory2D, low: float, high: float) -> FloatArray:
     u = (low + high) / 2 + (high - low) * _GAUSS_NODES / 2
     heading = np.deg2rad(evaluate_heading(trajectory, u))
     tangent = np.column_stack((np.cos(heading), np.sin(heading)))
@@ -293,7 +286,7 @@ def _adaptive_tangent_integral(
     high: float,
     tolerance: float,
     max_depth: int,
-) -> np.ndarray:
+) -> FloatArray:
     whole = _gauss_tangent_integral(trajectory, low, high)
     middle = (low + high) / 2
     left = _gauss_tangent_integral(trajectory, low, middle)
@@ -305,14 +298,90 @@ def _adaptive_tangent_integral(
         raise ValueError("trajectory position integration did not meet tolerance")
     return _adaptive_tangent_integral(
         trajectory, low, middle, tolerance / 2, max_depth - 1
-    ) + _adaptive_tangent_integral(
-        trajectory, middle, high, tolerance / 2, max_depth - 1
+    ) + _adaptive_tangent_integral(trajectory, middle, high, tolerance / 2, max_depth - 1)
+
+
+def _gauss_tangent_integral_many(
+    trajectory: Trajectory2D, low: FloatArray, high: FloatArray
+) -> FloatArray:
+    midpoints = (low + high) / 2.0
+    half_widths = (high - low) / 2.0
+    parameters = midpoints[:, None] + half_widths[:, None] * _GAUSS_NODES
+    headings = np.deg2rad(evaluate_heading(trajectory, parameters.ravel())).reshape(
+        parameters.shape
     )
+    tangent = np.stack((np.cos(headings), np.sin(headings)), axis=2)
+    return half_widths[:, None] * np.sum(_GAUSS_WEIGHTS[None, :, None] * tangent, axis=1)
+
+
+def _adaptive_tangent_integral_many(
+    trajectory: Trajectory2D,
+    low: FloatArray,
+    high: FloatArray,
+    tolerance: float,
+    max_depth: int,
+) -> FloatArray:
+    whole = _gauss_tangent_integral_many(trajectory, low, high)
+    middle = (low + high) / 2.0
+    refined = _gauss_tangent_integral_many(trajectory, low, middle) + _gauss_tangent_integral_many(
+        trajectory, middle, high
+    )
+    converged = np.linalg.norm(refined - whole, axis=1) <= tolerance
+    if np.all(converged):
+        return refined
+    if max_depth == 0:
+        raise ValueError("trajectory position integration did not meet tolerance")
+    result = refined.copy()
+    unresolved = np.flatnonzero(~converged)
+    result[unresolved] = _adaptive_tangent_integral_many(
+        trajectory, low[unresolved], middle[unresolved], tolerance / 2.0, max_depth - 1
+    ) + _adaptive_tangent_integral_many(
+        trajectory, middle[unresolved], high[unresolved], tolerance / 2.0, max_depth - 1
+    )
+    return result
+
+
+def _trajectory_positions_at(
+    trajectory: Trajectory2D,
+    u: FloatArray,
+    *,
+    tolerance: float = 1e-10,
+    max_depth: int = 24,
+) -> FloatArray:
+    values = _validated_parameters(u)
+    if not isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("position integration tolerance must be positive and finite")
+    max_depth = _require_integer(max_depth, name="max_depth", minimum=0)
+
+    knots = np.array([0.0, *(change.at for change in trajectory.heading_rate.changes), 1.0])
+    interval_tolerance = tolerance / (trajectory.length * (knots.size - 1))
+    prefix = np.zeros((knots.size, 2), dtype=float)
+    for index, (low, high) in enumerate(zip(knots[:-1], knots[1:], strict=True)):
+        prefix[index + 1] = prefix[index] + _adaptive_tangent_integral(
+            trajectory, low, high, interval_tolerance, int(max_depth)
+        )
+
+    segment_indices = np.clip(np.searchsorted(knots, values, side="right") - 1, 0, knots.size - 2)
+    positions = np.empty((values.size, 2), dtype=float)
+    for index in range(knots.size - 1):
+        selected = np.flatnonzero(segment_indices == index)
+        if selected.size == 0:
+            continue
+        lows = np.full(selected.size, knots[index])
+        partials = _adaptive_tangent_integral_many(
+            trajectory,
+            lows,
+            values[selected],
+            interval_tolerance,
+            int(max_depth),
+        )
+        positions[selected] = trajectory.length * (prefix[index] + partials)
+    return positions
 
 
 def _cubic_value(
-    start: np.ndarray, c1: np.ndarray, c2: np.ndarray, end: np.ndarray, t: float
-) -> np.ndarray:
+    start: FloatArray, c1: FloatArray, c2: FloatArray, end: FloatArray, t: float
+) -> FloatArray:
     one = 1.0 - t
     return one**3 * start + 3 * one**2 * t * c1 + 3 * one * t**2 * c2 + t**3 * end
 
@@ -327,33 +396,19 @@ def trajectory_to_cubic_path(
     """
     if not isfinite(max_error) or max_error <= 0.0:
         raise ValueError("max_error must be positive and finite")
-    if (
-        isinstance(max_depth, bool)
-        or not isinstance(max_depth, (int, np.integer))
-        or max_depth < 0
-    ):
-        raise ValueError("max_depth must be a nonnegative integer")
+    max_depth = _require_integer(max_depth, name="max_depth", minimum=0)
 
-    position_cache: dict[float, np.ndarray] = {0.0: np.zeros(2)}
-    profile_knots = [
-        0.0,
-        *(change.at for change in trajectory.heading_rate.changes),
-        1.0,
-    ]
+    profile_knots = [0.0, *(change.at for change in trajectory.heading_rate.changes), 1.0]
+    position_cache: dict[float, FloatArray] = {0.0: np.zeros(2)}
 
-    def position_at(u: float) -> np.ndarray:
-        if u in position_cache:
-            return position_cache[u]
-        limits = [value for value in profile_knots if 0.0 < value < u]
-        limits.append(u)
-        points = [0.0, *limits]
-        integral = np.zeros(2)
-        tolerance = max_error * 1e-4 / max(1, len(points) - 1)
-        for low, high in zip(points, points[1:], strict=False):
-            integral += _adaptive_tangent_integral(
-                trajectory, low, high, tolerance, max_depth + 8
-            )
-        position_cache[u] = trajectory.length * integral
+    def position_at(u: float) -> FloatArray:
+        if u not in position_cache:
+            position_cache[u] = _trajectory_positions_at(
+                trajectory,
+                np.array([u]),
+                tolerance=max_error * 1e-4,
+                max_depth=max_depth + 8,
+            )[0]
         return position_cache[u]
 
     segments: list[CubicSegment] = []
@@ -371,11 +426,7 @@ def trajectory_to_cubic_path(
             approximated = _cubic_value(start, control1, control2, end, t)
             errors.append(float(np.linalg.norm(expected - approximated)))
         if max(errors) <= max_error:
-            segments.append(
-                CubicSegment(
-                    c1=tuple(control1), c2=tuple(control2), end=tuple(end)
-                )
-            )
+            segments.append(CubicSegment(c1=tuple(control1), c2=tuple(control2), end=tuple(end)))
             return
         if depth == 0:
             raise ValueError("trajectory cubic conversion did not meet max_error")

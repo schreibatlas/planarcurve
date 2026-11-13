@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from math import hypot, isfinite
+from math import hypot
 
 import numpy as np
 
@@ -16,11 +16,18 @@ except ImportError as exc:  # pragma: no cover
 
 from .bezier import evaluate_cubic, evaluate_quadratic_bezier
 from .transforms import Affine2D
-from .types import CubicBezier, Point2D, QuadraticBezier
+from .types import CubicBezier, FloatArray, Point2D, PointLike, QuadraticBezier, _require_integer
 
 
 @dataclass(frozen=True)
 class PathInfo:
+    """Aggregate geometry metadata across an SVG path's subpaths.
+
+    ``start`` and ``tangent_start`` refer to the first subpath, while ``end``
+    and ``tangent_end`` refer to the last. ``closed`` is true only when every
+    subpath is closed; ``subpath_closed`` records each subpath's status.
+    """
+
     start: Point2D
     end: Point2D
     tangent_start: Point2D | None
@@ -29,6 +36,7 @@ class PathInfo:
     bbox: tuple[float, float, float, float]
     move_count: int
     closed: bool
+    subpath_closed: tuple[bool, ...]
 
 
 def _norm(vector: Point2D) -> Point2D | None:
@@ -36,6 +44,7 @@ def _norm(vector: Point2D) -> Point2D | None:
     if length <= 1e-12:
         return None
     return vector[0] / length, vector[1] / length
+
 
 def _quad(p0: Point2D, p1: Point2D, p2: Point2D, t: float) -> Point2D:
     curve = QuadraticBezier(p0, p1, p2)
@@ -63,159 +72,138 @@ def _record(path: str):
 
 
 def _validate_samples_per_curve(samples_per_curve: int) -> int:
-    if (
-        isinstance(samples_per_curve, bool)
-        or not isinstance(samples_per_curve, (int, np.integer))
-        or samples_per_curve < 1
-    ):
-        raise ValueError("samples_per_curve must be an integer of at least one")
-    return int(samples_per_curve)
+    return _require_integer(samples_per_curve, name="samples_per_curve", minimum=1)
 
 
-def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
-    """Inspect a path; Bezier lengths are sampled approximations."""
+def _sample_subpaths(
+    path: str, samples_per_curve: int
+) -> tuple[tuple[FloatArray, ...], tuple[bool, ...]]:
     samples_per_curve = _validate_samples_per_curve(samples_per_curve)
     operations = _record(path)
-    move_count = sum(op == "moveTo" for op, _ in operations)
-    closed = any(op == "closePath" for op, _ in operations)
-    if move_count == 0:
-        raise ValueError("path has no moveTo")
+    subpaths: list[FloatArray] = []
+    closed_subpaths: list[bool] = []
     current: Point2D | None = None
     subpath_start: Point2D | None = None
-    start: Point2D | None = None
-    first_direction: Point2D | None = None
-    last_direction: Point2D | None = None
-    sampled: list[Point2D] = []
-    length = 0.0
+    sampled: list[Point2D] | None = None
+    closed = False
+
+    def finish_subpath() -> None:
+        nonlocal sampled
+        if sampled is not None:
+            subpaths.append(np.asarray(sampled, dtype=float))
+            closed_subpaths.append(closed)
+            sampled = None
+
     for operator, args in operations:
         if operator == "moveTo":
+            finish_subpath()
             current = tuple(map(float, args[0]))
             subpath_start = current
-            if start is None:
-                start = current
-            sampled.append(current)
+            sampled = [current]
+            closed = False
         elif operator == "endPath":
-            continue
+            finish_subpath()
+            current = None
+            subpath_start = None
+            closed = False
         elif operator == "closePath":
-            if current is None or subpath_start is None:
-                raise ValueError("closePath before moveTo")
-            direction = subpath_start[0] - current[0], subpath_start[1] - current[1]
-            if direction != (0.0, 0.0):
-                first_direction = first_direction or direction
-                last_direction = direction
-                length += hypot(*direction)
-                sampled.append(subpath_start)
-            current = subpath_start
-        elif current is None:
-            raise ValueError("drawing operation before moveTo")
-        elif operator == "lineTo":
-            end = tuple(map(float, args[0]))
-            direction = end[0] - current[0], end[1] - current[1]
-            first_direction = first_direction or direction
-            last_direction = direction
-            length += hypot(*direction)
-            sampled.append(end)
-            current = end
-        elif operator == "curveTo":
-            if len(args) != 3:
-                raise ValueError("only ordinary cubic curves are supported")
-            c1, c2, end = (tuple(map(float, point)) for point in args)
-            direction = c1[0] - current[0], c1[1] - current[1]
-            if hypot(*direction) <= 1e-12:
-                direction = end[0] - current[0], end[1] - current[1]
-            first_direction = first_direction or direction
-            last_direction = end[0] - c2[0], end[1] - c2[1]
-            points = [
-                _cubic(current, c1, c2, end, i / samples_per_curve)
-                for i in range(samples_per_curve + 1)
-            ]
-            length += _segment_length(points)
-            sampled.extend(points[1:])
-            current = end
-        elif operator == "qCurveTo":
-            if len(args) != 2 or args[-1] is None:
-                raise ValueError("only ordinary quadratic curves are supported")
-            control, end = (tuple(map(float, point)) for point in args)
-            direction = control[0] - current[0], control[1] - current[1]
-            first_direction = first_direction or direction
-            last_direction = end[0] - control[0], end[1] - control[1]
-            points = [
-                _quad(current, control, end, i / samples_per_curve)
-                for i in range(samples_per_curve + 1)
-            ]
-            length += _segment_length(points)
-            sampled.extend(points[1:])
-            current = end
-        else:
-            raise ValueError(f"unsupported path operation: {operator}")
-    if start is None or current is None:
-        raise ValueError("path has no usable geometry")
-    if not all(isfinite(value) for point in sampled for value in point):
-        raise ValueError("path contains non-finite coordinates")
-    xs = [point[0] for point in sampled]
-    ys = [point[1] for point in sampled]
-    return PathInfo(
-        start=start,
-        end=current,
-        tangent_start=_norm(first_direction) if first_direction else None,
-        tangent_end=_norm(last_direction) if last_direction else None,
-        length=length,
-        bbox=(min(xs), min(ys), max(xs), max(ys)),
-        move_count=move_count,
-        closed=closed,
-    )
-
-
-def sample_path(path: str, samples_per_curve: int = 24) -> list[Point2D]:
-    samples_per_curve = _validate_samples_per_curve(samples_per_curve)
-    operations = _record(path)
-    current: Point2D | None = None
-    subpath_start: Point2D | None = None
-    sampled: list[Point2D] = []
-    for operator, args in operations:
-        if operator == "moveTo":
-            current = tuple(map(float, args[0]))
-            subpath_start = current
-            sampled.append(current)
-        elif operator == "endPath":
-            continue
-        elif operator == "closePath":
-            if current is None or subpath_start is None:
+            if current is None or subpath_start is None or sampled is None:
                 raise ValueError("closePath before moveTo")
             if current != subpath_start:
                 sampled.append(subpath_start)
             current = subpath_start
-        elif current is None:
+            closed = True
+        elif current is None or sampled is None:
             raise ValueError("drawing operation before moveTo")
         elif operator == "lineTo":
             current = tuple(map(float, args[0]))
             sampled.append(current)
+            closed = False
         elif operator == "curveTo":
             if len(args) != 3:
                 raise ValueError("only ordinary cubic curves are supported")
             c1, c2, end = (tuple(map(float, point)) for point in args)
             points = [
-                _cubic(current, c1, c2, end, i / samples_per_curve)
-                for i in range(samples_per_curve + 1)
+                _cubic(current, c1, c2, end, index / samples_per_curve)
+                for index in range(samples_per_curve + 1)
             ]
             sampled.extend(points[1:])
             current = end
+            closed = False
         elif operator == "qCurveTo":
             if len(args) != 2 or args[-1] is None:
                 raise ValueError("only ordinary quadratic curves are supported")
             control, end = (tuple(map(float, point)) for point in args)
             points = [
-                _quad(current, control, end, i / samples_per_curve)
-                for i in range(samples_per_curve + 1)
+                _quad(current, control, end, index / samples_per_curve)
+                for index in range(samples_per_curve + 1)
             ]
             sampled.extend(points[1:])
             current = end
+            closed = False
         else:
             raise ValueError(f"unsupported path operation: {operator}")
-    return sampled
+
+    finish_subpath()
+    if not subpaths:
+        raise ValueError("path has no moveTo")
+    if not all(np.isfinite(points).all() for points in subpaths):
+        raise ValueError("path contains non-finite coordinates")
+    return tuple(subpaths), tuple(closed_subpaths)
+
+
+def sample_subpaths(path: str, samples_per_curve: int = 24) -> tuple[FloatArray, ...]:
+    """Sample each SVG subpath separately, without adding connecting segments."""
+    subpaths, _ = _sample_subpaths(path, samples_per_curve)
+    return subpaths
+
+
+def _endpoint_direction(points: FloatArray, *, from_start: bool) -> Point2D | None:
+    vectors = np.diff(points, axis=0)
+    indices = np.flatnonzero(np.linalg.norm(vectors, axis=1) > 1e-12)
+    if indices.size == 0:
+        return None
+    index = indices[0] if from_start else indices[-1]
+    return float(vectors[index, 0]), float(vectors[index, 1])
+
+
+def analyze_path(path: str, samples_per_curve: int = 24) -> PathInfo:
+    """Inspect sampled geometry; curve lengths and endpoint tangents are approximations."""
+    subpaths, closed_subpaths = _sample_subpaths(path, samples_per_curve)
+    all_points = np.concatenate(subpaths, axis=0)
+    first_direction = _endpoint_direction(subpaths[0], from_start=True)
+    last_direction = _endpoint_direction(subpaths[-1], from_start=False)
+    return PathInfo(
+        start=tuple(map(float, subpaths[0][0])),
+        end=tuple(map(float, subpaths[-1][-1])),
+        tangent_start=_norm(first_direction) if first_direction else None,
+        tangent_end=_norm(last_direction) if last_direction else None,
+        length=sum(_segment_length(map(tuple, points)) for points in subpaths),
+        bbox=(
+            float(all_points[:, 0].min()),
+            float(all_points[:, 1].min()),
+            float(all_points[:, 0].max()),
+            float(all_points[:, 1].max()),
+        ),
+        move_count=len(subpaths),
+        closed=all(closed_subpaths),
+        subpath_closed=closed_subpaths,
+    )
+
+
+def sample_path(path: str, samples_per_curve: int = 24) -> FloatArray:
+    """Sample one SVG subpath, raising if the path contains multiple subpaths.
+
+    Use :func:`sample_subpaths` when the SVG path contains multiple moves.
+    """
+    subpaths = sample_subpaths(path, samples_per_curve)
+    if len(subpaths) != 1:
+        raise ValueError("path contains multiple subpaths; use sample_subpaths")
+    return subpaths[0]
 
 
 def transform_path(path: str, transform: Affine2D) -> str:
+    """Transform all path coordinates while preserving subpath commands."""
     operations = _record(path)
     chunks: list[str] = []
 
@@ -224,7 +212,7 @@ def transform_path(path: str, transform: Affine2D) -> str:
         return float(x), float(y)
 
     def fmt(point: Point2D) -> str:
-        return f"{point[0]:.6g} {point[1]:.6g}"
+        return f"{point[0]:.15g} {point[1]:.15g}"
 
     for operator, args in operations:
         if operator == "moveTo":
@@ -249,6 +237,7 @@ def transform_path(path: str, transform: Affine2D) -> str:
 
 
 def path_without_initial_move(path: str) -> str:
+    """Return SVG drawing commands after the path's first moveTo."""
     text = path.strip()
     if not text.startswith("M"):
         raise ValueError("path must start with M")
@@ -256,7 +245,7 @@ def path_without_initial_move(path: str) -> str:
     chunks: list[str] = []
 
     def fmt(point: Point2D) -> str:
-        return f"{point[0]:.6g} {point[1]:.6g}"
+        return f"{point[0]:.15g} {point[1]:.15g}"
 
     skipped = False
     for operator, args in operations:
@@ -280,19 +269,20 @@ def path_without_initial_move(path: str) -> str:
 
 
 def cubic_bridge(
-    p0: Point2D,
-    t0: Point2D | None,
-    p3: Point2D,
-    t3: Point2D | None,
+    p0: PointLike,
+    t0: PointLike | None,
+    p3: PointLike,
+    t3: PointLike | None,
     tension: float,
 ) -> str:
-    t0 = t0 or (1.0, 0.0)
-    t3 = t3 or (1.0, 0.0)
+    """Create an SVG cubic bridge between two points and endpoint tangents."""
+    t0 = (1.0, 0.0) if t0 is None else t0
+    t3 = (1.0, 0.0) if t3 is None else t3
     c1 = p0[0] + t0[0] * tension, p0[1] + t0[1] * tension
     c2 = p3[0] - t3[0] * tension, p3[1] - t3[1] * tension
     return (
-        f"M {p0[0]:.6g} {p0[1]:.6g} "
-        f"C {c1[0]:.6g} {c1[1]:.6g} "
-        f"{c2[0]:.6g} {c2[1]:.6g} "
-        f"{p3[0]:.6g} {p3[1]:.6g}"
+        f"M {p0[0]:.15g} {p0[1]:.15g} "
+        f"C {c1[0]:.15g} {c1[1]:.15g} "
+        f"{c2[0]:.15g} {c2[1]:.15g} "
+        f"{p3[0]:.15g} {p3[1]:.15g}"
     )

@@ -1,26 +1,41 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from math import isfinite
 from typing import TypeAlias
 
+import numpy as np
+from numpy.typing import ArrayLike, NDArray
+
 Point2D: TypeAlias = tuple[float, float]
+PointLike: TypeAlias = ArrayLike
+FloatArray: TypeAlias = NDArray[np.float64]
 
 
-def _finite_point(value: Point2D, *, name: str) -> Point2D:
-    point = (float(value[0]), float(value[1]))
-    if not all(isfinite(component) for component in point):
+def _finite_point(value: ArrayLike, *, name: str) -> Point2D:
+    point = np.asarray(value, dtype=float)
+    if point.shape != (2,):
+        raise ValueError(f"{name} must have exactly two coordinates")
+    if not np.isfinite(point).all():
         raise ValueError(f"{name} must contain finite coordinates")
-    return point
+    return float(point[0]), float(point[1])
+
+
+def _require_integer(value: int, *, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be an integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be an integer of at least {minimum}")
+    return int(value)
 
 
 @dataclass(frozen=True)
 class CubicSegment:
     """Cubic Bezier chain segment; the start point is the previous endpoint."""
 
-    c1: Point2D
-    c2: Point2D
-    end: Point2D
+    c1: PointLike
+    c2: PointLike
+    end: PointLike
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "c1", _finite_point(self.c1, name="c1"))
@@ -32,8 +47,9 @@ class CubicSegment:
 class CubicPath:
     """A cubic chain with an explicit starting point."""
 
-    start: Point2D
+    start: PointLike
     segments: tuple[CubicSegment, ...]
+    segments: Sequence[CubicSegment]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "start", _finite_point(self.start, name="start"))
@@ -42,6 +58,7 @@ class CubicPath:
             raise TypeError("segments must contain CubicSegment values")
 
     def to_beziers(self) -> tuple[CubicBezier, ...]:
+        """Return the cubic Bezier segments in this path."""
         point = self.start
         beziers = []
         for segment in self.segments:
@@ -52,23 +69,25 @@ class CubicPath:
 
 @dataclass(frozen=True)
 class CubicBezier:
-    p0: Point2D
-    p1: Point2D
-    p2: Point2D
-    p3: Point2D
+    """Cubic Bezier curve defined by four finite 2D control points."""
+
+    p0: PointLike
+    p1: PointLike
+    p2: PointLike
+    p3: PointLike
 
     def __post_init__(self) -> None:
         for name in ("p0", "p1", "p2", "p3"):
             object.__setattr__(self, name, _finite_point(getattr(self, name), name=name))
 
 
-
-
 @dataclass(frozen=True)
 class QuadraticBezier:
-    p0: Point2D
-    p1: Point2D
-    p2: Point2D
+    """Quadratic Bezier curve defined by three finite 2D control points."""
+
+    p0: PointLike
+    p1: PointLike
+    p2: PointLike
 
     def __post_init__(self) -> None:
         for name in ("p0", "p1", "p2"):

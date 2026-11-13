@@ -56,6 +56,7 @@ def test_sparse_irls_recovers_shared_spline_and_locked_endpoints():
         seed_weight=1e-6,
         robust_scale=0.1,
         irls_iterations=4,
+        endpoint_policy=SplineEndpointPolicy(start="locked", end="locked"),
     )
     result = fit_spline_control_points(
         basis, observations_for(basis), seed_control_points=seed, options=options
@@ -106,3 +107,6 @@ def test_spline_fit_rejects_invalid_observations_and_options():
         fit_spline_control_points(basis, [bad])
     with pytest.raises(ValueError, match="robust scale"):
         SplineFitOptions(robust_scale=0.0)
+
+    with pytest.raises(ValueError, match="irls_iterations"):
+        SplineFitOptions(irls_iterations=1.5)

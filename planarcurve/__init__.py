@@ -18,7 +18,15 @@ from .trajectory import (
     trajectory_total_turn,
 )
 from .transforms import Affine2D, Similarity2D
-from .types import CubicBezier, CubicPath, CubicSegment, Point2D, QuadraticBezier
+from .types import (
+    CubicBezier,
+    CubicPath,
+    CubicSegment,
+    FloatArray,
+    Point2D,
+    PointLike,
+    QuadraticBezier,
+)
 
 try:
     from ._version import __version__
@@ -29,11 +37,13 @@ __all__ = [
     "Affine2D",
     "CubicBezier",
     "CubicPath",
+    "FloatArray",
     "QuadraticBezier",
     "CubicSegment",
     "HeadingRateChange",
     "HeadingRateProfile",
     "Point2D",
+    "PointLike",
     "Pose2D",
     "Similarity2D",
     "Trajectory2D",

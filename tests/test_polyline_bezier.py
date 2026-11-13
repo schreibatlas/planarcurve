@@ -20,10 +20,12 @@ from planarcurve.polyline import (
     closest_point_on_polyline,
     cumulative_arclength,
     distance_to_polyline,
+    mean_squared_turn_angle,
     normalized_arclength,
     polyline_length,
     project_points_to_polyline,
     resample_polyline_by_arclength,
+    symmetric_polyline_distance,
 )
 from planarcurve.types import CubicBezier, QuadraticBezier
 
@@ -101,9 +103,7 @@ def test_quadratic_bezier_type_and_length():
     assert quadratic_length(curve, tolerance=1e-4) > 2.0
 
 
-
 def test_symmetric_polyline_distance_uses_segments_and_is_direction_invariant():
-    from planarcurve.polyline import symmetric_polyline_distance
 
     horizontal = np.array([[0.0, 0.0], [10.0, 0.0]])
     denser = np.array([[0.0, 0.0], [2.0, 0.0], [10.0, 0.0]])
@@ -114,7 +114,6 @@ def test_symmetric_polyline_distance_uses_segments_and_is_direction_invariant():
 
 
 def test_symmetric_polyline_distance_validates_samples_and_degenerate_curves():
-    from planarcurve.polyline import symmetric_polyline_distance
 
     line = np.array([[0.0, 0.0], [1.0, 0.0]])
     with pytest.raises(ValueError, match="samples"):
@@ -124,7 +123,6 @@ def test_symmetric_polyline_distance_validates_samples_and_degenerate_curves():
 
 
 def test_mean_squared_turn_angle_is_scale_invariant_and_can_resample():
-    from planarcurve.polyline import mean_squared_turn_angle
 
     right_angle = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
     scaled = right_angle * 3.0
@@ -134,3 +132,17 @@ def test_mean_squared_turn_angle_is_scale_invariant_and_can_resample():
     assert mean_squared_turn_angle(np.array([[0.0, 0.0], [2.0, 0.0]])) == 0.0
     with pytest.raises(ValueError, match="nonzero"):
         mean_squared_turn_angle(np.zeros((2, 2)))
+
+
+def test_integer_parameters_and_point_dimensions_are_validated():
+    line = np.array([[0.0, 0.0], [1.0, 0.0]])
+    with pytest.raises(ValueError, match="count"):
+        resample_polyline_by_arclength(line, 3.5)
+    with pytest.raises(ValueError, match="max_depth"):
+        flatten_cubic(CubicBezier((0, 0), (1, 0), (2, 0), (3, 0)), max_depth=2.5)
+    with pytest.raises(ValueError, match="max_depth"):
+        cubic_length(CubicBezier((0, 0), (1, 0), (2, 0), (3, 0)), max_depth=2.5)
+    with pytest.raises(ValueError, match="exactly two"):
+        CubicBezier((0.0, 0.0, 99.0), (1, 0), (2, 0), (3, 0))
+    with pytest.raises(ValueError, match="samples"):
+        symmetric_polyline_distance(line, line, samples=3.5)

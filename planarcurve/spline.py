@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from math import isfinite
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 try:
     from scipy.interpolate import BSpline
@@ -17,48 +18,60 @@ except ImportError as exc:  # pragma: no cover - exercised in minimal installati
     raise ImportError("planarcurve.spline requires SciPy; install planarcurve[spline]") from exc
 
 from .transforms import Affine2D
-from .types import CubicSegment, Point2D
+from .types import CubicPath, CubicSegment, FloatArray, _finite_point, _require_integer
 
 
 @dataclass(frozen=True)
 class BSplineCurve:
-    knots: tuple[float, ...]
-    control_points: tuple[Point2D, ...]
+    """Clamped cubic B-spline on [0, 1] with simple interior knots."""
+
+    knots: ArrayLike
+    control_points: ArrayLike
     degree: int = 3
 
     def __post_init__(self) -> None:
+        degree = _require_integer(self.degree, name="degree", minimum=0)
+        object.__setattr__(self, "degree", degree)
         knots = tuple(float(value) for value in self.knots)
-        control_points = tuple((float(point[0]), float(point[1])) for point in self.control_points)
+        control_points = tuple(
+            _finite_point(point, name="control point") for point in self.control_points
+        )
         object.__setattr__(self, "knots", knots)
         object.__setattr__(self, "control_points", control_points)
         validate_bspline_geometry(self)
 
     def evaluate(
-        self, u: np.ndarray, *, transform: Affine2D | None = None, derivatives: bool = True
+        self, u: ArrayLike, *, transform: Affine2D | None = None, derivatives: bool = True
     ) -> CurveEvaluation:
+        """Evaluate positions and optional derivatives at normalized parameters."""
         return evaluate_bspline(self, u, transform=transform, derivatives=derivatives)
 
     def sample_by_arclength(
         self, count: int, *, transform: Affine2D | None = None
     ) -> CurveEvaluation:
+        """Return samples approximately uniform in transformed arc length."""
         return sample_curve_by_arclength(self, count, transform=transform)
 
     def to_cubic_segments(self, *, tolerance: float = 1e-8) -> list[CubicSegment]:
+        """Convert this spline to cubic Bezier segments."""
         return spline_to_cubic_segments(self, tolerance=tolerance)
 
-
-BSplineGeometry = BSplineCurve
+    def to_cubic_path(self, *, tolerance: float = 1e-8) -> CubicPath:
+        """Convert this spline to an explicit cubic path."""
+        return spline_to_cubic_path(self, tolerance=tolerance)
 
 
 @dataclass(frozen=True)
 class CurveEvaluation:
-    u: np.ndarray
-    xy: np.ndarray
-    tangent: np.ndarray
-    curvature: np.ndarray | None
+    """Spline positions and optional differential geometry at sample parameters."""
+
+    u: FloatArray
+    xy: FloatArray
+    tangent: FloatArray | None
+    curvature: FloatArray | None
 
 
-def _validate_parameters(u: np.ndarray) -> np.ndarray:
+def _validate_parameters(u: ArrayLike) -> FloatArray:
     values = np.asarray(u, dtype=float)
     if values.ndim != 1 or not np.isfinite(values).all():
         raise ValueError("curve parameters must be a finite one-dimensional array")
@@ -68,8 +81,9 @@ def _validate_parameters(u: np.ndarray) -> np.ndarray:
 
 
 def validate_bspline_geometry(geometry: BSplineCurve) -> None:
+    """Validate supported clamped cubic B-spline geometry."""
     if geometry.degree != 3:
-        raise ValueError("the MVP supports cubic B-splines only")
+        raise ValueError("BSplineCurve supports cubic B-splines only")
     if len(geometry.control_points) < 4:
         raise ValueError("cubic B-splines require at least four control points")
     if len(geometry.knots) != len(geometry.control_points) + geometry.degree + 1:
@@ -88,6 +102,7 @@ def validate_bspline_geometry(geometry: BSplineCurve) -> None:
 
 
 def bspline_from_geometry(geometry: BSplineCurve) -> tuple[BSpline, BSpline]:
+    """Create SciPy spline objects for the x and y coordinates."""
     validate_bspline_geometry(geometry)
     knots = np.asarray(geometry.knots, dtype=float)
     control_points = np.asarray(geometry.control_points, dtype=float)
@@ -97,7 +112,8 @@ def bspline_from_geometry(geometry: BSplineCurve) -> tuple[BSpline, BSpline]:
     )
 
 
-def spline_design_matrix(u: np.ndarray, geometry: BSplineCurve) -> csr_array:
+def spline_design_matrix(u: ArrayLike, geometry: BSplineCurve) -> csr_array:
+    """Return the sparse B-spline design matrix for normalized parameters."""
     parameters = _validate_parameters(u)
     validate_bspline_geometry(geometry)
     return BSpline.design_matrix(
@@ -109,28 +125,31 @@ def spline_design_matrix(u: np.ndarray, geometry: BSplineCurve) -> csr_array:
 
 
 def control_roughness_matrix(control_count: int, order: int = 2) -> csr_array:
-    if isinstance(control_count, bool) or control_count < 2:
-        raise ValueError("control_count must be at least two")
-    if isinstance(order, bool) or order < 1 or order >= control_count:
-        raise ValueError("difference order must be between one and control_count - 1")
+    """Return a sparse finite-difference regularizer for control points."""
+    control_count = _require_integer(control_count, name="control_count", minimum=2)
+    order = _require_integer(order, name="order", minimum=1)
+    if order >= control_count:
+        raise ValueError("difference order must be less than control_count")
     return csr_array(np.diff(np.eye(control_count), n=order, axis=0))
 
 
 def evaluate_bspline(
     geometry: BSplineCurve,
-    u: np.ndarray,
+    u: ArrayLike,
     *,
     transform: Affine2D | None = None,
     derivatives: bool = True,
 ) -> CurveEvaluation:
+    """Evaluate spline positions and optional tangent and curvature fields."""
     parameters = _validate_parameters(u)
     x_spline, y_spline = bspline_from_geometry(geometry)
     xy = np.column_stack((x_spline(parameters), y_spline(parameters)))
     transform = transform or Affine2D.identity()
     xy = transform.apply(xy)
     if not derivatives:
-        return CurveEvaluation(parameters, xy, np.zeros_like(xy), None)
+        return CurveEvaluation(parameters, xy, None, None)
     first = np.column_stack((x_spline.derivative()(parameters), y_spline.derivative()(parameters)))
+    first = first @ transform.linear.T
     second = np.column_stack(
         (x_spline.derivative(2)(parameters), y_spline.derivative(2)(parameters))
     )
@@ -144,18 +163,14 @@ def evaluate_bspline(
     return CurveEvaluation(parameters, xy, tangent, curvature)
 
 
-# More direct standalone name.
-evaluate_curve = evaluate_bspline
-
-
 def sample_curve_by_arclength(
     geometry: BSplineCurve,
     count: int,
     *,
     transform: Affine2D | None = None,
 ) -> CurveEvaluation:
-    if isinstance(count, bool) or count < 2:
-        raise ValueError("arclength sample count must be at least two")
+    """Sample the spline approximately uniformly by transformed arc length."""
+    count = _require_integer(count, name="count", minimum=2)
     dense_u = np.linspace(0.0, 1.0, max(1024, count * 32))
     dense = evaluate_bspline(geometry, dense_u, transform=transform, derivatives=False).xy
     segment_lengths = np.linalg.norm(np.diff(dense, axis=0), axis=1)
@@ -170,7 +185,7 @@ def sample_curve_by_arclength(
     return evaluate_bspline(geometry, parameters, transform=transform)
 
 
-def _bezier_values(control_points: np.ndarray, t: np.ndarray) -> np.ndarray:
+def _bezier_values(control_points: FloatArray, t: ArrayLike) -> FloatArray:
     t = np.asarray(t, dtype=float)[:, None]
     one_minus_t = 1.0 - t
     return (
@@ -184,6 +199,7 @@ def _bezier_values(control_points: np.ndarray, t: np.ndarray) -> np.ndarray:
 def spline_to_cubic_segments(
     geometry: BSplineCurve, *, tolerance: float = 1e-8
 ) -> list[CubicSegment]:
+    """Convert a supported B-spline to cubic Bezier chain segments."""
     if not np.isfinite(tolerance) or tolerance <= 0.0:
         raise ValueError("conversion tolerance must be positive and finite")
     validate_bspline_geometry(geometry)
@@ -219,3 +235,10 @@ def spline_to_cubic_segments(
         if np.max(np.linalg.norm(_bezier_values(controls, local) - expected, axis=1)) > tolerance:
             raise ValueError("cubic conversion exceeded the requested tolerance")
     return segments
+
+
+def spline_to_cubic_path(geometry: BSplineCurve, *, tolerance: float = 1e-8) -> CubicPath:
+    """Convert a supported B-spline to a path with explicit start point."""
+    start = evaluate_bspline(geometry, np.array([0.0]), derivatives=False).xy[0]
+    segments = spline_to_cubic_segments(geometry, tolerance=tolerance)
+    return CubicPath(tuple(start), tuple(segments))

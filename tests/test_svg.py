@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from planarcurve.svg import analyze_path, cubic_bridge, sample_path, transform_path
+from planarcurve.svg import (
+    analyze_path,
+    cubic_bridge,
+    sample_path,
+    sample_subpaths,
+    transform_path,
+)
 from planarcurve.transforms import Affine2D
 
 
@@ -38,11 +44,40 @@ def test_close_path_transform_and_sampling_preserve_multiple_subpaths():
     assert transformed.count("Z") == 2
     info = analyze_path(path)
     assert info.closed
+    assert info.subpath_closed == (True, True)
     assert info.move_count == 2
     assert info.length == pytest.approx(10.0 + 10.0 + 2**0.5 * 10.0 + 20.0)
     assert info.end == (20.0, 20.0)
     moved_info = analyze_path(transformed)
     assert moved_info.end == (25.0, 17.0)
-    samples = sample_path(path)
-    assert samples.count((0.0, 0.0)) == 2
-    assert samples.count((20.0, 20.0)) == 2
+    subpaths = sample_subpaths(path)
+    assert len(subpaths) == 2
+    assert tuple(map(tuple, subpaths[0])).count((0.0, 0.0)) == 2
+    assert tuple(map(tuple, subpaths[1])).count((20.0, 20.0)) == 2
+    with pytest.raises(ValueError, match="multiple subpaths"):
+        sample_path(path)
+
+
+def test_mixed_subpath_closure_is_reported_per_subpath():
+    path = "M 0 0 L 1 0 Z M 10 0 L 11 0"
+    info = analyze_path(path)
+    subpaths = sample_subpaths(path)
+
+    assert info.closed is False
+    assert info.subpath_closed == (True, False)
+    assert info.move_count == 2
+    assert info.start == (0.0, 0.0)
+    assert info.end == (11.0, 0.0)
+    assert info.tangent_start == (1.0, 0.0)
+    assert info.tangent_end == (1.0, 0.0)
+    assert info.length == pytest.approx(3.0)
+    assert [len(points) for points in subpaths] == [3, 2]
+
+
+def test_identity_svg_transform_preserves_coordinate_precision():
+    path = "M 0.1234567890123 0.9876543210987 L 1.2345678901234 2.3456789012345"
+    transformed = transform_path(path, Affine2D.identity())
+
+    assert "0.1234567890123 0.9876543210987" in transformed
+    assert "1.2345678901234 2.3456789012345" in transformed
+    assert analyze_path(transformed).start == pytest.approx((0.1234567890123, 0.9876543210987))

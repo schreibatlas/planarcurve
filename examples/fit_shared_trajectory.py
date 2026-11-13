@@ -28,24 +28,7 @@ TRANSFORMS = (
     Similarity2D(scale=66.0, rotation_deg=22.0, dx=280.0, dy=110.0),
     Similarity2D(scale=78.0, rotation_deg=-18.0, dx=505.0, dy=130.0),
 )
-rng = np.random.default_rng(4)
-base_points = evaluate_trajectory(TRAJECTORY, count=81).xy
-occurrences = [
-    transform.apply(base_points) + rng.normal(0.0, 0.25, base_points.shape)
-    for transform in TRANSFORMS
-]
-fit = fit_shared_trajectory_profile(
-    occurrences,
-    TrajectoryFitOptions(
-        change_count=2,
-        samples=48,
-        restarts=0,
-        seed=0,
-        max_nfev=100,
-    ),
-)
-fitted_base = evaluate_trajectory(fit.trajectory, count=81).xy
-colors = ("#1769aa", "#d97900", "#388e3c")
+COLORS = ("#1769aa", "#d97900", "#388e3c")
 
 
 def polyline(points: np.ndarray, color: str, *, opacity: float = 1.0) -> str:
@@ -56,23 +39,47 @@ def polyline(points: np.ndarray, color: str, *, opacity: float = 1.0) -> str:
     )
 
 
-rows = []
-for observed, transform, color in zip(occurrences, fit.transforms, colors, strict=True):
-    rows.append(polyline(observed, color, opacity=0.35))
-    rows.append(polyline(transform.apply(fitted_base), color))
-svg = (
-    '<svg xmlns="http://www.w3.org/2000/svg" width="680" height="260" '
-    'viewBox="0 0 680 260">'
-    + "".join(rows)
-    + "</svg>"
-)
-Path("fit_shared_trajectory.svg").write_text(svg, encoding="utf-8")
-print(f"fit success: {fit.success}")
-print(f"median position error: {fit.metrics['median_position_error']:.3f}")
-for index, transform in enumerate(fit.transforms):
-    print(
-        f"occurrence {index}: scale={transform.scale:.3f}, "
-        f"rotation={transform.rotation_deg:.2f}, "
-        f"offset=({transform.dx:.2f}, {transform.dy:.2f})"
+def main() -> None:
+    rng = np.random.default_rng(4)
+    base_points = evaluate_trajectory(TRAJECTORY, count=81).xy
+    occurrences = [
+        transform.apply(base_points) + rng.normal(0.0, 0.25, base_points.shape)
+        for transform in TRANSFORMS
+    ]
+    fit = fit_shared_trajectory_profile(
+        occurrences,
+        TrajectoryFitOptions(
+            change_count=2,
+            samples=48,
+            restarts=0,
+            seed=0,
+            max_nfev=100,
+        ),
     )
-print("wrote fit_shared_trajectory.svg")
+    assert fit.success
+    assert len(fit.transforms) == len(occurrences)
+    assert fit.metrics["p95_position_error"] < 1.0
+
+    fitted_base = evaluate_trajectory(fit.trajectory, count=81).xy
+    rows = []
+    for observed, transform, color in zip(occurrences, fit.transforms, COLORS, strict=True):
+        rows.append(polyline(observed, color, opacity=0.35))
+        rows.append(polyline(transform.apply(fitted_base), color))
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="680" height="260" '
+        'viewBox="0 0 680 260">' + "".join(rows) + "</svg>"
+    )
+    Path("fit_shared_trajectory.svg").write_text(svg, encoding="utf-8")
+    print(f"fit success: {fit.success}")
+    print(f"p95 position error: {fit.metrics['p95_position_error']:.3f}")
+    for index, transform in enumerate(fit.transforms):
+        print(
+            f"occurrence {index}: scale={transform.scale:.3f}, "
+            f"rotation={transform.rotation_deg:.2f}, "
+            f"offset=({transform.dx:.2f}, {transform.dy:.2f})"
+        )
+    print("wrote fit_shared_trajectory.svg")
+
+
+if __name__ == "__main__":
+    main()
