@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=69", "wheel", "setuptools_scm[toml]>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "planarcurve"
+description = "Numerical tools for planar curves, trajectories, splines, Beziers, and SVG paths."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Holger Nahrstaedt"}]
+dynamic = ["version"]
+keywords = [
+  "geometry",
+  "curves",
+  "trajectory",
+  "bezier",
+  "bspline",
+  "arc-length",
+  "svg",
+]
+dependencies = [
+  "numpy>=1.24",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+[project.urls]
+Homepage = "https://github.com/schreibatlas/planarcurve"
+Repository = "https://github.com/schreibatlas/planarcurve"
+Issues = "https://github.com/schreibatlas/planarcurve/issues"
+Changelog = "https://github.com/schreibatlas/planarcurve/releases"
+
+[project.optional-dependencies]
+spline = ["scipy>=1.11"]
+svg = ["fonttools>=4.55"]
+dev = [
+  "pytest>=8",
+  "ruff>=0.8",
+  "scipy>=1.11",
+  "fonttools>=4.55",
+  "build>=1.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["planarcurve*"]
+
+[tool.setuptools.package-data]
+planarcurve = ["py.typed"]
+
+[tool.setuptools_scm]
+write_to = "planarcurve/_version.py"
+fallback_version = "0.1.0.dev0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
