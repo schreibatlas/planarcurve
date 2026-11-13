@@ -122,6 +122,54 @@ def distance_to_polyline(points: np.ndarray, polyline: np.ndarray) -> np.ndarray
     return project_points_to_polyline(points, polyline).distance
 
 
+
+
+def symmetric_polyline_distance(
+    a: np.ndarray, b: np.ndarray, *, samples: int = 64
+) -> float:
+    """Return the mean bidirectional distance between two polylines.
+
+    Both polylines are sampled uniformly by arc length. The result is an
+    average Euclidean distance in the coordinate units of the input arrays.
+    """
+    if isinstance(samples, (bool, np.bool_)) or not isinstance(samples, (int, np.integer)):
+        raise ValueError("samples must be an integer of at least two")
+    if samples < 2:
+        raise ValueError("samples must be an integer of at least two")
+    sampled_a = resample_polyline_by_arclength(a, int(samples))
+    sampled_b = resample_polyline_by_arclength(b, int(samples))
+    a_to_b = distance_to_polyline(sampled_a, sampled_b)
+    b_to_a = distance_to_polyline(sampled_b, sampled_a)
+    return 0.5 * float(a_to_b.mean() + b_to_a.mean())
+
+
+def mean_squared_turn_angle(
+    points: np.ndarray, *, samples: int | None = None
+) -> float:
+    """Return mean squared adjacent-segment turn angle in radians squared.
+
+    When ``samples`` is given, the polyline is first resampled uniformly by
+    arc length. The result is the unnormalized mean of squared angles between
+    consecutive nonzero segment directions, so it does not depend on scale.
+    """
+    values = _points(points)
+    if samples is not None:
+        if isinstance(samples, (bool, np.bool_)) or not isinstance(samples, (int, np.integer)):
+            raise ValueError("samples must be an integer of at least two")
+        if samples < 2:
+            raise ValueError("samples must be an integer of at least two")
+        values = resample_polyline_by_arclength(values, int(samples))
+    vectors = np.diff(values, axis=0)
+    lengths = np.linalg.norm(vectors, axis=1)
+    valid = lengths > 1e-12
+    if not np.any(valid):
+        raise ValueError("turning metric requires a nonzero polyline")
+    directions = vectors[valid] / lengths[valid, None]
+    if len(directions) < 2:
+        return 0.0
+    turns = np.arccos(np.clip(np.sum(directions[:-1] * directions[1:], axis=1), -1.0, 1.0))
+    return float(np.mean(turns**2))
+
 def closest_point_on_polyline(point: np.ndarray, polyline: np.ndarray) -> np.ndarray:
     query = np.asarray(point, dtype=float)
     if query.shape != (2,):

@@ -99,3 +99,38 @@ def test_quadratic_bezier_type_and_length():
         evaluate_quadratic_bezier(curve, np.array([0.0, 1.0])), [[0, 0], [2, 0]]
     )
     assert quadratic_length(curve, tolerance=1e-4) > 2.0
+
+
+
+def test_symmetric_polyline_distance_uses_segments_and_is_direction_invariant():
+    from planarcurve.polyline import symmetric_polyline_distance
+
+    horizontal = np.array([[0.0, 0.0], [10.0, 0.0]])
+    denser = np.array([[0.0, 0.0], [2.0, 0.0], [10.0, 0.0]])
+    offset = np.array([[0.0, 1.0], [10.0, 1.0]])
+    assert symmetric_polyline_distance(horizontal, denser) == pytest.approx(0.0)
+    assert symmetric_polyline_distance(horizontal, offset) == pytest.approx(1.0)
+    assert symmetric_polyline_distance(horizontal, offset[::-1]) == pytest.approx(1.0)
+
+
+def test_symmetric_polyline_distance_validates_samples_and_degenerate_curves():
+    from planarcurve.polyline import symmetric_polyline_distance
+
+    line = np.array([[0.0, 0.0], [1.0, 0.0]])
+    with pytest.raises(ValueError, match="samples"):
+        symmetric_polyline_distance(line, line, samples=1)
+    with pytest.raises(ValueError, match="zero-length"):
+        symmetric_polyline_distance(np.zeros((2, 2)), line)
+
+
+def test_mean_squared_turn_angle_is_scale_invariant_and_can_resample():
+    from planarcurve.polyline import mean_squared_turn_angle
+
+    right_angle = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
+    scaled = right_angle * 3.0
+    assert mean_squared_turn_angle(right_angle) == pytest.approx(np.pi**2 / 4.0)
+    assert mean_squared_turn_angle(right_angle, samples=5) == pytest.approx(np.pi**2 / 12.0)
+    assert mean_squared_turn_angle(scaled, samples=5) == pytest.approx(np.pi**2 / 12.0)
+    assert mean_squared_turn_angle(np.array([[0.0, 0.0], [2.0, 0.0]])) == 0.0
+    with pytest.raises(ValueError, match="nonzero"):
+        mean_squared_turn_angle(np.zeros((2, 2)))

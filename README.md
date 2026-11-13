@@ -32,6 +32,22 @@ uniform = resample_polyline_by_arclength(points, count=20)
 print(polyline_length(points), uniform.shape)
 ```
 
+## Polyline scoring
+
+`planarcurve.polyline.symmetric_polyline_distance(a, b, samples=64)` resamples both polylines uniformly by arc length, computes nearest-segment distances in both directions, and returns their mean. The result uses the input coordinate units and does not depend on either polyline's vertex count.
+
+`mean_squared_turn_angle(points, samples=None)` returns the mean squared angle between adjacent nonzero segments in radians squared. Supplying `samples` first resamples the polyline by arc length. SkeletonPaths uses this metric with 64 samples as a deterministic route tie-breaker.
+
+```python
+import numpy as np
+from planarcurve.polyline import mean_squared_turn_angle, symmetric_polyline_distance
+
+points = np.array([[0.0, 0.0], [1.0, 1.0], [3.0, 0.0]])
+other = points + np.array([0.0, 0.5])
+print(symmetric_polyline_distance(points, other))
+print(mean_squared_turn_angle(points, samples=64))
+```
+
 Create and sample a normalized heading-rate trajectory:
 
 ```python
