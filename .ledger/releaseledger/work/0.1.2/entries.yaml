@@ -1,0 +1,39 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.1.2
+git_base_ref: bb677b613dc177e139fc87f7ac3ae91cb8966334
+git_base_sha: bb677b613dc177e139fc87f7ac3ae91cb8966334
+git_head_ref: 780e83f0ab59f850201db8895674b37bca53a653
+git_head_sha: 780e83f0ab59f850201db8895674b37bca53a653
+include_merges: nontrivial
+entries:
+- kind: added
+  summary: 'Added reversible trajectory chains, polyline intersection diagnostics, and weighted similarity-transform fitting'
+  status: accepted
+  source_refs:
+  - git:780e83f0ab59f850201db8895674b37bca53a653
+  paths:
+  - README.md
+  - docs/api/fitting.md
+  - docs/api/polyline.md
+  - docs/api/trajectory.md
+  - docs/api/transforms.md
+  - docs/concepts/trajectories.md
+  - docs/guides/fitting.md
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/polyline.py
+  - planarcurve/trajectory_chain.py
+  - planarcurve/transforms.py
+  - tests/test_fitting_trajectory.py
+  - tests/test_polyline_bezier.py
+  - tests/test_trajectory_chain.py
+  - tests/test_transforms.py
+  sources:
+  - git:780e83f0ab59f850201db8895674b37bca53a653
+  prs: []
+  issues: []
+  contributors:
+  - '@holgern'

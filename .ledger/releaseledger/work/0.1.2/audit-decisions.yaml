@@ -1,0 +1,27 @@
+rows:
+- sha: 780e83f0ab59f850201db8895674b37bca53a653
+  inspected: true
+  inspected_paths:
+  - README.md
+  - docs/api/fitting.md
+  - docs/api/polyline.md
+  - docs/api/trajectory.md
+  - docs/api/transforms.md
+  - docs/concepts/trajectories.md
+  - docs/guides/fitting.md
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/polyline.py
+  - planarcurve/trajectory_chain.py
+  - planarcurve/transforms.py
+  - tests/test_fitting_trajectory.py
+  - tests/test_polyline_bezier.py
+  - tests/test_trajectory_chain.py
+  - tests/test_transforms.py
+  observed_behavior: "Added direction-aware trajectory chains with reverse traversal, pose propagation, and connected cubic-path conversion; added polyline self-intersection diagnostics and weighted similarity fitting. The public exports and API guidance document these capabilities."
+  public_impact: public
+  decision: accepted
+  target_entry_key: null
+  target_entry_id: null
+  notes: ''
+  stale: false

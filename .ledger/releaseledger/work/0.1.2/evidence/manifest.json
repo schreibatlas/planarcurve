@@ -1,0 +1,40 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 822,
+      "deletions": 7,
+      "patch_file": "780e83f.patch",
+      "patch_sha256": "7c524e3446b9a3842787e31c668b2c5c911a2304f02e336bd50e2d4e553a889a",
+      "paths": [
+        "README.md",
+        "docs/api/fitting.md",
+        "docs/api/polyline.md",
+        "docs/api/trajectory.md",
+        "docs/api/transforms.md",
+        "docs/concepts/trajectories.md",
+        "docs/guides/fitting.md",
+        "planarcurve/__init__.py",
+        "planarcurve/fitting/__init__.py",
+        "planarcurve/polyline.py",
+        "planarcurve/trajectory_chain.py",
+        "planarcurve/transforms.py",
+        "tests/test_fitting_trajectory.py",
+        "tests/test_polyline_bezier.py",
+        "tests/test_trajectory_chain.py",
+        "tests/test_transforms.py"
+      ],
+      "sha": "780e83f0ab59f850201db8895674b37bca53a653",
+      "short_sha": "780e83f",
+      "source_ref": "git:780e83f0ab59f850201db8895674b37bca53a653"
+    }
+  ],
+  "git_base_ref": "bb677b613dc177e139fc87f7ac3ae91cb8966334",
+  "git_base_sha": "bb677b613dc177e139fc87f7ac3ae91cb8966334",
+  "git_head_ref": "780e83f0ab59f850201db8895674b37bca53a653",
+  "git_head_sha": "780e83f0ab59f850201db8895674b37bca53a653",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.1.2",
+  "schema_version": 1
+}

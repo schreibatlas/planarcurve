@@ -1,0 +1,1039 @@
+ README.md                        |   7 +-
+ docs/api/fitting.md              |  11 +++
+ docs/api/polyline.md             |   2 +-
+ docs/api/trajectory.md           |  14 ++-
+ docs/api/transforms.md           |   2 +
+ docs/concepts/trajectories.md    |   7 ++
+ docs/guides/fitting.md           |  16 +++
+ planarcurve/__init__.py          |  17 +++-
+ planarcurve/fitting/__init__.py  |  16 ++-
+ planarcurve/polyline.py          | 157 ++++++++++++++++++++++++++++-
+ planarcurve/trajectory_chain.py  | 208 +++++++++++++++++++++++++++++++++++++++
+ planarcurve/transforms.py        |  98 ++++++++++++++++++
+ tests/test_fitting_trajectory.py |  17 ++++
+ tests/test_polyline_bezier.py    |  41 ++++++++
+ tests/test_trajectory_chain.py   | 114 +++++++++++++++++++++
+ tests/test_transforms.py         | 102 ++++++++++++++++++-
+ 16 files changed, 822 insertions(+), 7 deletions(-)
+
+diff --git a/README.md b/README.md
+index 0445ef4..70fdefa 100644
+--- a/README.md
++++ b/README.md
+@@ -23,9 +23,10 @@ For development, install `planarcurve[dev]`.
+ ## API map
+
+ ```text
+-planarcurve.polyline       lengths, resampling, projection, scoring
++planarcurve.polyline       lengths, resampling, projection, intersections, scoring
+ planarcurve.bezier         evaluation, derivatives, curvature, flattening
+ planarcurve.trajectory     normalized heading-rate trajectories
++planarcurve.trajectory_chain  directed segments, pose propagation, chain sampling
+ planarcurve.transforms     affine and similarity transforms
+ planarcurve.spline         cubic B-splines and cubic-path conversion (SciPy)
+ planarcurve.fitting        spline and trajectory fitting (SciPy)
+@@ -71,6 +72,10 @@ print(sample.xy[-1], trajectory_total_turn(trajectory))
+
+ Here `u` is normalized progress in `[0, 1]`. Heading rates are degrees per unit progress. Geometric curvature is signed inverse length and equals `radians(heading_rate) / trajectory.length`.
+
++## Directed trajectory chains
++
++`TrajectoryChain` composes generic `Trajectory2D` segments in either direction. Reversal uses the heading-rate profile, and chain samples preserve segment boundaries, tangent changes, and cumulative arc length. `trajectory_chain_to_cubic_path()` provides a connected cubic representation. These primitives contain no application-specific movement semantics.
++
+ ## Fitting
+ ## Fitting
+
+diff --git a/docs/api/fitting.md b/docs/api/fitting.md
+index d9c4a21..4c769eb 100644
+--- a/docs/api/fitting.md
++++ b/docs/api/fitting.md
+@@ -2,6 +2,17 @@
+
+ Optional fitting utilities require SciPy. Install with `python -m pip install 'planarcurve[fit]'`.
+
++## Stable public fitting API
++
++The package exports `SplineEndpointPolicy`, `SharedTrajectoryFitResult`, `TrajectoryFitOptions`, `TrajectoryFitResult`, `fit_shared_trajectory_profile`, and `fit_trajectory` from `planarcurve.fitting`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
++
++```{automodule} planarcurve.fitting
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
++
+ ## Endpoint policy
+
+ ```{automodule} planarcurve.fitting.policy
+diff --git a/docs/api/polyline.md b/docs/api/polyline.md
+index 1f21449..c727b65 100644
+--- a/docs/api/polyline.md
++++ b/docs/api/polyline.md
+@@ -1,6 +1,6 @@
+ # `planarcurve.polyline`
+
+-Polyline measurement, resampling, projection, and scoring.
++Polyline measurement, resampling, projection, scoring, and self-intersection diagnostics. Collinear overlaps are conservatively reported as intersections; ordinary adjacent joins are excluded.
+
+ ```{automodule} planarcurve.polyline
+ :members:
+diff --git a/docs/api/trajectory.md b/docs/api/trajectory.md
+index e2f6277..b814b87 100644
+--- a/docs/api/trajectory.md
++++ b/docs/api/trajectory.md
+@@ -1,6 +1,6 @@
+ # `planarcurve.trajectory`
+
+-Normalized-progress heading-rate trajectories, sampling, integration, endpoint poses, and cubic-path approximation.
++Normalized-progress heading-rate trajectories, exact reverse traversal, pose propagation, trajectory-chain sampling, and cubic-path approximation.
+
+ ```{automodule} planarcurve.trajectory
+ :members:
+@@ -8,3 +8,15 @@ Normalized-progress heading-rate trajectories, sampling, integration, endpoint p
+ :show-inheritance:
+ :member-order: bysource
+ ```
++
++
++## Trajectory chains
++
++`reverse_trajectory()` constructs reverse traversal from the heading-rate profile. `evaluate_trajectory_chain()` propagates poses and returns sampled positions, tangents, cumulative arc length, and per-segment progress. `trajectory_chain_to_cubic_path()` converts the connected chain to one cubic path.
++
++```{automodule} planarcurve.trajectory_chain
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/api/transforms.md b/docs/api/transforms.md
+index 3a32eb2..ccb08bd 100644
+--- a/docs/api/transforms.md
++++ b/docs/api/transforms.md
+@@ -1,7 +1,9 @@
+ # `planarcurve.transforms`
+
++Two-dimensional affine and positive-scale similarity transforms.
+ Two-dimensional affine and positive-scale similarity transforms.
+
++`fit_similarity_transform(target, source, *, weights=None)` maps source points onto target points. It fits a deterministic, orientation-preserving transform with positive scale, rotation, and translation. Reflections are not fitted. Optional finite, nonnegative point weights control each correspondence's contribution.
+ ```{automodule} planarcurve.transforms
+ :members:
+ :undoc-members:
+diff --git a/docs/concepts/trajectories.md b/docs/concepts/trajectories.md
+index faf9e17..0abf87a 100644
+--- a/docs/concepts/trajectories.md
++++ b/docs/concepts/trajectories.md
+@@ -35,3 +35,10 @@ Use `evaluate_trajectory_at()` for arbitrary `u` values or `sample_trajectory_by
+ ## Conversion to cubic Beziers
+
+ `trajectory_to_cubic_path()` adaptively subdivides profile intervals. It compares the cubic approximation with the numerically evaluated trajectory at the quarter, midpoint, and three-quarter parameters. `max_error` is therefore a sampled acceptance criterion, not a proof of a continuous global Hausdorff error bound.
++
++
++## Reverse traversal and trajectory chains
++
++`reverse_trajectory()` builds the reversed heading-rate profile using `heading_rev(u) = heading(1-u) + 180°` and `rate_rev(u) = -rate(1-u)`. It does not reverse a sampled point array. The resulting trajectory starts at its own origin and matches the original curve traversed backward after rigid alignment.
++
++A `TrajectoryChain` is an ordered sequence of `DirectedTrajectory` values. The first segment is aligned to the requested starting pose. Each following segment starts at the previous endpoint, while its local starting heading remains an offset in the propagated frame. Position joins are exact by construction, and tangent discontinuities are retained rather than smoothed. Chain samples include both sides of each join, along with segment index, segment progress, and global cumulative arc length. Use `trajectory_chain_to_cubic_path()` for a connected cubic representation.
+diff --git a/docs/guides/fitting.md b/docs/guides/fitting.md
+index d7dd8cd..835fa53 100644
+--- a/docs/guides/fitting.md
++++ b/docs/guides/fitting.md
+@@ -2,6 +2,22 @@
+
+ Fitting is optional and requires SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. The package provides two separate workflows: fitting shared B-spline control points, and fitting a normalized heading-rate trajectory with occurrence placement transforms.
+
++## Stable trajectory fitting imports
++
++The stable trajectory-fitting API is exported from `planarcurve.fitting`:
++
++```python
++from planarcurve.fitting import (
++    SharedTrajectoryFitResult,
++    TrajectoryFitOptions,
++    TrajectoryFitResult,
++    fit_shared_trajectory_profile,
++    fit_trajectory,
++)
++```
++
++These imports require SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. Low-level initialization helpers remain in `planarcurve.fitting.trajectory` and are not part of this package-level export.
++
+ ## Fit spline control points
+
+ A `SplineObservation` pairs parameter values `u` with observed 2D points `xy`. Optional nonnegative per-point weights control each observation's contribution. Multiple observations may be combined to solve one shared control-point set against the same spline basis.
+diff --git a/planarcurve/__init__.py b/planarcurve/__init__.py
+index a9727c2..b6be240 100644
+--- a/planarcurve/__init__.py
++++ b/planarcurve/__init__.py
+@@ -17,7 +17,15 @@ from .trajectory import (
+     trajectory_to_cubic_path,
+     trajectory_total_turn,
+ )
+-from .transforms import Affine2D, Similarity2D
++from .trajectory_chain import (
++    DirectedTrajectory,
++    TrajectoryChain,
++    TrajectoryChainSample,
++    evaluate_trajectory_chain,
++    reverse_trajectory,
++    trajectory_chain_to_cubic_path,
++)
++from .transforms import Affine2D, Similarity2D, fit_similarity_transform
+ from .types import (
+     CubicBezier,
+     CubicPath,
+@@ -46,6 +54,7 @@ __all__ = [
+     "PointLike",
+     "Pose2D",
+     "Similarity2D",
++    "fit_similarity_transform",
+     "Trajectory2D",
+     "TrajectorySample",
+     "__version__",
+@@ -59,4 +68,10 @@ __all__ = [
+     "trajectory_end_pose",
+     "trajectory_to_cubic_path",
+     "trajectory_total_turn",
++    "DirectedTrajectory",
++    "TrajectoryChain",
++    "TrajectoryChainSample",
++    "evaluate_trajectory_chain",
++    "reverse_trajectory",
++    "trajectory_chain_to_cubic_path",
+ ]
+diff --git a/planarcurve/fitting/__init__.py b/planarcurve/fitting/__init__.py
+index edb6461..5abd92d 100644
+--- a/planarcurve/fitting/__init__.py
++++ b/planarcurve/fitting/__init__.py
+@@ -1,3 +1,17 @@
+ from .policy import SplineEndpointPolicy
++from .trajectory import (
++    SharedTrajectoryFitResult,
++    TrajectoryFitOptions,
++    TrajectoryFitResult,
++    fit_shared_trajectory_profile,
++    fit_trajectory,
++)
+
+-__all__ = ["SplineEndpointPolicy"]
++__all__ = [
++    "SharedTrajectoryFitResult",
++    "SplineEndpointPolicy",
++    "TrajectoryFitOptions",
++    "TrajectoryFitResult",
++    "fit_shared_trajectory_profile",
++    "fit_trajectory",
++]
+diff --git a/planarcurve/polyline.py b/planarcurve/polyline.py
+index 9c54a48..bfe7a7e 100644
+--- a/planarcurve/polyline.py
++++ b/planarcurve/polyline.py
+@@ -5,7 +5,7 @@ from dataclasses import dataclass
+ import numpy as np
+ from numpy.typing import ArrayLike
+
+-from .types import FloatArray, _require_integer
++from .types import FloatArray, Point2D, _require_integer
+
+
+ def _points(values: ArrayLike) -> FloatArray:
+@@ -215,3 +215,158 @@ def closest_point_on_polyline(point: ArrayLike, polyline: ArrayLike) -> FloatArr
+     if query.shape != (2,):
+         raise ValueError("point must have shape (2,)")
+     return project_points_to_polyline(query[None, :], polyline).point[0]
++
++
++@dataclass(frozen=True)
++class PolylineIntersection:
++    """One self-intersection between two polyline segments.
++
++    Segment indices are zero-based. For a collinear overlap, ``xy`` is the
++    first point of overlap along ``first_segment``.
++    """
++
++    first_segment: int
++    second_segment: int
++    xy: Point2D
++
++
++def _cross_2d(first: FloatArray, second: FloatArray) -> float:
++    return float(first[0] * second[1] - first[1] * second[0])
++
++
++def _project_to_segment(point: FloatArray, start: FloatArray, vector: FloatArray) -> FloatArray:
++    squared_length = float(vector @ vector)
++    if squared_length == 0.0:
++        return start
++    parameter = float(np.clip((point - start) @ vector / squared_length, 0.0, 1.0))
++    return start + parameter * vector
++
++
++def _segment_intersection(
++    first_start: FloatArray,
++    first_end: FloatArray,
++    second_start: FloatArray,
++    second_end: FloatArray,
++    tolerance: float,
++) -> tuple[FloatArray, float] | None:
++    first_vector = first_end - first_start
++    second_vector = second_end - second_start
++    first_length = float(np.linalg.norm(first_vector))
++    second_length = float(np.linalg.norm(second_vector))
++
++    if first_length <= tolerance:
++        if second_length <= tolerance:
++            if np.linalg.norm(first_start - second_start) <= tolerance:
++                return (first_start + second_start) / 2.0, 0.0
++            return None
++        projected = _project_to_segment(first_start, second_start, second_vector)
++        if np.linalg.norm(first_start - projected) <= tolerance:
++            return (first_start + projected) / 2.0, 0.0
++        return None
++    if second_length <= tolerance:
++        projected = _project_to_segment(second_start, first_start, first_vector)
++        if np.linalg.norm(second_start - projected) <= tolerance:
++            return (second_start + projected) / 2.0, 0.0
++        return None
++
++    offset = second_start - first_start
++    denominator = _cross_2d(first_vector, second_vector)
++    parallel_threshold = tolerance * (first_length + second_length)
++    if abs(denominator) > parallel_threshold:
++        first_parameter = _cross_2d(offset, second_vector) / denominator
++        second_parameter = _cross_2d(offset, first_vector) / denominator
++        first_margin = tolerance / first_length
++        second_margin = tolerance / second_length
++        if not (
++            -first_margin <= first_parameter <= 1.0 + first_margin
++            and -second_margin <= second_parameter <= 1.0 + second_margin
++        ):
++            return None
++        first_point = first_start + np.clip(first_parameter, 0.0, 1.0) * first_vector
++        second_point = second_start + np.clip(second_parameter, 0.0, 1.0) * second_vector
++        if np.linalg.norm(first_point - second_point) <= tolerance:
++            return (first_point + second_point) / 2.0, 0.0
++        return None
++
++    first_line_distance = abs(_cross_2d(offset, first_vector)) / first_length
++    second_line_distance = abs(_cross_2d(second_end - first_start, first_vector)) / first_length
++    if max(first_line_distance, second_line_distance) > tolerance:
++        return None
++
++    first_axis = first_vector / first_length
++    second_low = float((second_start - first_start) @ first_axis)
++    second_high = float((second_end - first_start) @ first_axis)
++    overlap_low = max(0.0, min(second_low, second_high))
++    overlap_high = min(first_length, max(second_low, second_high))
++    if overlap_high < overlap_low - tolerance:
++        return None
++
++    overlap_length = max(0.0, overlap_high - overlap_low)
++    if overlap_high >= overlap_low:
++        point = first_start + overlap_low * first_axis
++    else:
++        midpoint = np.clip((overlap_low + overlap_high) / 2.0, 0.0, first_length)
++        first_point = first_start + midpoint * first_axis
++        second_point = _project_to_segment(first_point, second_start, second_vector)
++        point = (first_point + second_point) / 2.0
++    return point, overlap_length
++
++
++def polyline_self_intersections(
++    points: ArrayLike,
++    *,
++    closed: bool = False,
++    tolerance: float = 1e-9,
++) -> tuple[PolylineIntersection, ...]:
++    """Return intersections between nontrivial pairs of polyline segments.
++
++    Consecutive segments that meet only at their shared endpoint are not
++    reported. With ``closed=True``, an implicit last-to-first segment is added
++    unless the input already repeats its first point, and the first and last
++    segments are treated as adjacent. A repeated endpoint is therefore an
++    intersection when ``closed=False`` but an ordinary loop join when
++    ``closed=True``. Collinear overlap is conservatively reported; ``xy`` is
++    the first point of overlap along the first segment. ``tolerance`` is an
++    absolute coordinate-space tolerance and may be zero.
++    """
++    vertices = _points(points)
++    if len(vertices) < 2:
++        raise ValueError("self-intersection detection requires at least two points")
++    if not np.isfinite(tolerance) or tolerance < 0.0:
++        raise ValueError("tolerance must be finite and nonnegative")
++
++    segments = list(zip(vertices[:-1], vertices[1:], strict=True))
++    if closed and not np.array_equal(vertices[0], vertices[-1]):
++        segments.append((vertices[-1], vertices[0]))
++
++    intersections = []
++    segment_count = len(segments)
++    for first_index in range(segment_count):
++        first_start, first_end = segments[first_index]
++        for second_index in range(first_index + 1, segment_count):
++            second_start, second_end = segments[second_index]
++            hit = _segment_intersection(
++                first_start,
++                first_end,
++                second_start,
++                second_end,
++                tolerance,
++            )
++            if hit is None:
++                continue
++            point, overlap_length = hit
++            adjacent = second_index == first_index + 1 or (
++                closed and first_index == 0 and second_index == segment_count - 1
++            )
++            if adjacent and overlap_length <= tolerance:
++                shared = first_end if second_index == first_index + 1 else first_start
++                if np.linalg.norm(point - shared) <= tolerance:
++                    continue
++            intersections.append(
++                PolylineIntersection(
++                    first_segment=first_index,
++                    second_segment=second_index,
++                    xy=(float(point[0]), float(point[1])),
++                )
++            )
++    return tuple(intersections)
+diff --git a/planarcurve/trajectory_chain.py b/planarcurve/trajectory_chain.py
+new file mode 100644
+index 0000000..2352bb8
+--- /dev/null
++++ b/planarcurve/trajectory_chain.py
+@@ -0,0 +1,208 @@
++"""Direction-aware concatenation and pose propagation for planar trajectories."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from math import cos, isfinite, radians, sin
++
++import numpy as np
++from numpy.typing import ArrayLike
++
++from .trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Pose2D,
++    Trajectory2D,
++    evaluate_heading,
++    evaluate_trajectory,
++    trajectory_to_cubic_path,
++)
++from .types import CubicPath, CubicSegment, FloatArray, _require_integer
++
++
++@dataclass(frozen=True)
++class DirectedTrajectory:
++    """A trajectory segment and the direction in which it is traversed."""
++
++    trajectory: Trajectory2D
++    reversed: bool = False
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.trajectory, Trajectory2D):
++            raise TypeError("trajectory must be a Trajectory2D")
++
++
++@dataclass(frozen=True)
++class TrajectoryChain:
++    """An ordered, nonempty sequence of directed trajectory segments."""
++
++    segments: tuple[DirectedTrajectory, ...]
++
++    def __post_init__(self) -> None:
++        segments = tuple(self.segments)
++        if not segments:
++            raise ValueError("a trajectory chain must contain at least one segment")
++        if not all(isinstance(segment, DirectedTrajectory) for segment in segments):
++            raise TypeError("segments must contain DirectedTrajectory values")
++        object.__setattr__(self, "segments", segments)
++
++
++@dataclass(frozen=True)
++class TrajectoryChainSample:
++    """Samples and parameter metadata for an evaluated trajectory chain."""
++
++    xy: FloatArray
++    tangent: FloatArray
++    arc_length: FloatArray
++    segment_index: np.ndarray
++    segment_u: FloatArray
++    end_pose: Pose2D
++
++
++def reverse_trajectory(trajectory: Trajectory2D) -> Trajectory2D:
++    """Return the exact heading-rate representation of reverse traversal.
++
++    For normalized progress ``u``, the reversed heading is
++    ``heading(1-u) + 180`` and its heading rate is ``-rate(1-u)``. The new
++    trajectory starts at its own origin and ends at the original start in a
++    local frame, so its samples agree with the original samples traversed in
++    reverse after rigid alignment.
++    """
++    profile = trajectory.heading_rate
++    reversed_profile = HeadingRateProfile(
++        start_rate_deg_per_u=-profile.end_rate_deg_per_u,
++        end_rate_deg_per_u=-profile.start_rate_deg_per_u,
++        changes=tuple(
++            HeadingRateChange(1.0 - change.at, -change.heading_rate_deg_per_u)
++            for change in reversed(profile.changes)
++        ),
++        interpolation=profile.interpolation,
++    )
++    end_heading = float(evaluate_heading(trajectory, np.array([1.0]))[0])
++    return Trajectory2D(
++        length=trajectory.length,
++        start_heading_deg=end_heading + 180.0,
++        heading_rate=reversed_profile,
++    )
++
++
++def _traversal(segment: DirectedTrajectory) -> Trajectory2D:
++    return reverse_trajectory(segment.trajectory) if segment.reversed else segment.trajectory
++
++
++def _rotation_matrix(angle_deg: float) -> FloatArray:
++    angle = radians(angle_deg)
++    cosine, sine = cos(angle), sin(angle)
++    return np.array([[cosine, -sine], [sine, cosine]], dtype=float)
++
++
++def _place_point(point: ArrayLike, origin: FloatArray, rotation: FloatArray) -> tuple[float, float]:
++    transformed = origin + np.asarray(point, dtype=float) @ rotation.T
++    return float(transformed[0]), float(transformed[1])
++
++
++def _initial_pose(start_pose: Pose2D | None) -> tuple[FloatArray, float]:
++    if start_pose is None:
++        return np.zeros(2, dtype=float), 0.0
++    position = np.asarray(start_pose.position, dtype=float)
++    if position.shape != (2,) or not np.isfinite(position).all():
++        raise ValueError("start_pose.position must contain two finite coordinates")
++    if not isfinite(start_pose.heading_deg):
++        raise ValueError("start_pose.heading_deg must be finite")
++    return position.copy(), float(start_pose.heading_deg)
++
++
++def evaluate_trajectory_chain(
++    chain: TrajectoryChain,
++    *,
++    samples_per_segment: int = 64,
++    start_pose: Pose2D | None = None,
++) -> TrajectoryChainSample:
++    """Sample a chain, propagating position and local heading frame by segment.
++
++    The first segment is aligned to ``start_pose.heading_deg``. Later segment
++    start headings remain offsets in the propagated local frame, so a heading
++    discontinuity is preserved rather than smoothed. Both sides of every join
++    are returned, with equal positions and separately recorded segment
++    parameters and tangents.
++    """
++    samples_per_segment = _require_integer(
++        samples_per_segment, name="samples_per_segment", minimum=2
++    )
++    position, frame_heading = _initial_pose(start_pose)
++    xy_parts = []
++    tangent_parts = []
++    arc_parts = []
++    index_parts = []
++    u_parts = []
++    arc_offset = 0.0
++    end_pose = Pose2D(
++        position=position.copy(),
++        heading_deg=frame_heading,
++        heading_rate_deg_per_u=0.0,
++    )
++
++    for index, directed in enumerate(chain.segments):
++        trajectory = _traversal(directed)
++        sample = evaluate_trajectory(trajectory, count=samples_per_segment)
++        rotation_deg = frame_heading - trajectory.start_heading_deg if index == 0 else frame_heading
++        rotation = _rotation_matrix(rotation_deg)
++        segment_xy = sample.xy @ rotation.T + position
++        segment_tangent = sample.tangent @ rotation.T
++        xy_parts.append(segment_xy)
++        tangent_parts.append(segment_tangent)
++        arc_parts.append(arc_offset + sample.arc_length)
++        index_parts.append(np.full(samples_per_segment, index, dtype=int))
++        u_parts.append(np.linspace(0.0, 1.0, samples_per_segment))
++
++        position = segment_xy[-1].copy()
++        frame_heading = rotation_deg + sample.end_pose.heading_deg
++        end_pose = Pose2D(
++            position=position.copy(),
++            heading_deg=float(frame_heading),
++            heading_rate_deg_per_u=sample.end_pose.heading_rate_deg_per_u,
++        )
++        arc_offset += trajectory.length
++
++    return TrajectoryChainSample(
++        xy=np.concatenate(xy_parts),
++        tangent=np.concatenate(tangent_parts),
++        arc_length=np.concatenate(arc_parts),
++        segment_index=np.concatenate(index_parts),
++        segment_u=np.concatenate(u_parts),
++        end_pose=end_pose,
++    )
++
++
++def trajectory_chain_to_cubic_path(
++    chain: TrajectoryChain,
++    *,
++    start_pose: Pose2D | None = None,
++    max_error: float = 1e-4,
++) -> CubicPath:
++    """Convert a connected trajectory chain to one connected ``CubicPath``."""
++    position, frame_heading = _initial_pose(start_pose)
++    path_start = tuple(float(value) for value in position)
++    cubic_segments: list[CubicSegment] = []
++
++    for index, directed in enumerate(chain.segments):
++        trajectory = _traversal(directed)
++        local_path = trajectory_to_cubic_path(trajectory, max_error=max_error)
++        rotation_deg = frame_heading - trajectory.start_heading_deg if index == 0 else frame_heading
++        rotation = _rotation_matrix(rotation_deg)
++
++        cubic_segments.extend(
++            CubicSegment(
++                c1=_place_point(segment.c1, position, rotation),
++                c2=_place_point(segment.c2, position, rotation),
++                end=_place_point(segment.end, position, rotation),
++            )
++            for segment in local_path.segments
++        )
++        position = np.asarray(
++            _place_point(local_path.segments[-1].end, position, rotation), dtype=float
++        )
++        end_heading = float(evaluate_heading(trajectory, np.array([1.0]))[0])
++        frame_heading = rotation_deg + end_heading
++
++    return CubicPath(path_start, tuple(cubic_segments))
+diff --git a/planarcurve/transforms.py b/planarcurve/transforms.py
+index b253da5..32f3f34 100644
+--- a/planarcurve/transforms.py
++++ b/planarcurve/transforms.py
+@@ -165,3 +165,101 @@ class Similarity2D:
+     def apply(self, points: ArrayLike) -> FloatArray:
+         """Apply the similarity transform to one or more points."""
+         return self.as_affine().apply(points)
++
++
++def fit_similarity_transform(
++    target: ArrayLike,
++    source: ArrayLike,
++    *,
++    weights: ArrayLike | None = None,
++) -> Similarity2D:
++    """Fit an orientation-preserving similarity mapping ``source`` onto ``target``.
++
++    The fitted transform has positive uniform scale, rotation, and translation.
++    Reflections are not representable by :class:`Similarity2D` and are never
++    fitted. Optional nonnegative weights assign each point pair's relative
++    contribution to the least-squares fit.
++    """
++    target_values = np.asarray(target, dtype=float)
++    source_values = np.asarray(source, dtype=float)
++    if (
++        target_values.ndim != 2
++        or target_values.shape[1] != 2
++        or source_values.shape != target_values.shape
++        or len(target_values) < 2
++    ):
++        raise ValueError("target and source points must share shape (N, 2), with N >= 2")
++    if not np.isfinite(target_values).all() or not np.isfinite(source_values).all():
++        raise ValueError("similarity-fit points must contain finite coordinates")
++
++    if weights is None:
++        fit_weights = np.ones(len(target_values), dtype=float)
++    else:
++        fit_weights = np.asarray(weights, dtype=float)
++        if fit_weights.shape != (len(target_values),):
++            raise ValueError("weights must have shape (N,)")
++        if not np.isfinite(fit_weights).all() or np.any(fit_weights < 0.0):
++            raise ValueError("weights must be finite and nonnegative")
++    maximum_weight = float(np.max(fit_weights))
++    if maximum_weight == 0.0:
++        raise ValueError("weights must have positive total weight")
++    fit_weights = fit_weights / maximum_weight
++    fit_weights /= fit_weights.sum()
++    active = fit_weights > 0.0
++    fit_weights = fit_weights[active]
++    source_values = source_values[active]
++    target_values = target_values[active]
++
++    first = int(np.flatnonzero(fit_weights)[0])
++    source_origin = source_values[first]
++    target_origin = target_values[first]
++    with np.errstate(over="ignore", invalid="ignore"):
++        source_offsets = source_values - source_origin
++        target_offsets = target_values - target_origin
++    if not np.isfinite(source_offsets).all() or not np.isfinite(target_offsets).all():
++        raise ValueError("similarity fit is numerically singular")
++
++    source_extent = float(np.max(np.abs(source_offsets)))
++    if source_extent == 0.0:
++        raise ValueError("source points must have nonzero spatial extent")
++    target_extent = float(np.max(np.abs(target_offsets)))
++    if target_extent == 0.0:
++        raise ValueError("target points must have nonzero spatial extent")
++
++    source_scaled = source_offsets / source_extent
++    target_scaled = target_offsets / target_extent
++    source_mean_scaled = fit_weights @ source_scaled
++    target_mean_scaled = fit_weights @ target_scaled
++    source_centered = source_scaled - source_mean_scaled
++    target_centered = target_scaled - target_mean_scaled
++    source_variance = float(np.sum(fit_weights * np.sum(source_centered**2, axis=1)))
++    target_variance = float(np.sum(fit_weights * np.sum(target_centered**2, axis=1)))
++    if not np.isfinite(source_variance) or source_variance <= np.finfo(float).eps:
++        raise ValueError("source points must have nonzero spatial extent")
++    if not np.isfinite(target_variance) or target_variance <= np.finfo(float).eps:
++        raise ValueError("similarity fit is numerically singular")
++
++    covariance = source_centered.T @ (fit_weights[:, None] * target_centered)
++    left, _, right_t = np.linalg.svd(covariance)
++    correction = np.eye(2)
++    correction[-1, -1] = 1.0 if np.linalg.det(left @ right_t) >= 0.0 else -1.0
++    row_rotation = left @ correction @ right_t
++    score = float(np.sum(fit_weights[:, None] * (source_centered @ row_rotation) * target_centered))
++    singularity_threshold = np.finfo(float).eps * np.sqrt(source_variance * target_variance)
++    if not np.isfinite(score) or score <= singularity_threshold:
++        raise ValueError("similarity fit is numerically singular")
++
++    normalized_scale = score / source_variance
++    scale = (target_extent / source_extent) * normalized_scale
++    source_mean = source_origin + source_extent * source_mean_scaled
++    target_mean = target_origin + target_extent * target_mean_scaled
++    translation = target_mean - scale * (source_mean @ row_rotation)
++    if not np.isfinite(scale) or scale <= 0.0 or not np.isfinite(translation).all():
++        raise ValueError("similarity fit is numerically singular")
++    rotation_deg = float(np.degrees(np.arctan2(row_rotation[0, 1], row_rotation[0, 0])))
++    return Similarity2D(
++        scale=float(scale),
++        rotation_deg=rotation_deg,
++        dx=float(translation[0]),
++        dy=float(translation[1]),
++    )
+diff --git a/tests/test_fitting_trajectory.py b/tests/test_fitting_trajectory.py
+index 428fd5e..30e3123 100644
+--- a/tests/test_fitting_trajectory.py
++++ b/tests/test_fitting_trajectory.py
+@@ -200,3 +200,20 @@ def test_fitted_profile_is_invariant_to_coordinate_scale_and_rotation():
+
+     for signature in signatures[1:]:
+         np.testing.assert_allclose(signature, signatures[0], rtol=0.1, atol=3.0)
++
++
++def test_fitting_package_exports_stable_trajectory_api():
++    import importlib
++
++    public = importlib.import_module("planarcurve.fitting")
++    implementation = importlib.import_module("planarcurve.fitting.trajectory")
++    public_names = (
++        "SharedTrajectoryFitResult",
++        "TrajectoryFitOptions",
++        "TrajectoryFitResult",
++        "fit_shared_trajectory_profile",
++        "fit_trajectory",
++    )
++
++    for name in public_names:
++        assert getattr(public, name) is getattr(implementation, name)
+diff --git a/tests/test_polyline_bezier.py b/tests/test_polyline_bezier.py
+index 7b3d5a5..b0acf3e 100644
+--- a/tests/test_polyline_bezier.py
++++ b/tests/test_polyline_bezier.py
+@@ -23,6 +23,7 @@ from planarcurve.polyline import (
+     mean_squared_turn_angle,
+     normalized_arclength,
+     polyline_length,
++    polyline_self_intersections,
+     project_points_to_polyline,
+     resample_polyline_by_arclength,
+     symmetric_polyline_distance,
+@@ -146,3 +147,43 @@ def test_integer_parameters_and_point_dimensions_are_validated():
+         CubicBezier((0.0, 0.0, 99.0), (1, 0), (2, 0), (3, 0))
+     with pytest.raises(ValueError, match="samples"):
+         symmetric_polyline_distance(line, line, samples=3.5)
++
++
++def test_polyline_self_intersections_skip_shared_joins_and_find_crossings():
++    ordinary_join = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
++    assert polyline_self_intersections(ordinary_join) == ()
++
++    crossing = np.array([[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]])
++    intersections = polyline_self_intersections(crossing)
++    assert len(intersections) == 1
++    assert intersections[0].first_segment == 0
++    assert intersections[0].second_segment == 2
++    np.testing.assert_allclose(intersections[0].xy, [1.0, 1.0])
++
++
++def test_polyline_self_intersections_observe_closed_loop_semantics():
++    repeated_endpoint = np.array([[0.0, 0.0], [2.0, 0.0], [1.0, 1.0], [0.0, 0.0]])
++
++    open_result = polyline_self_intersections(repeated_endpoint)
++    assert [(hit.first_segment, hit.second_segment) for hit in open_result] == [(0, 2)]
++    assert polyline_self_intersections(repeated_endpoint, closed=True) == ()
++
++    implicit_loop = repeated_endpoint[:-1]
++    assert polyline_self_intersections(implicit_loop, closed=True) == ()
++
++
++def test_polyline_self_intersections_report_collinear_adjacent_overlap():
++    retraced = np.array([[0.0, 0.0], [3.0, 0.0], [1.0, 0.0]])
++
++    intersections = polyline_self_intersections(retraced)
++
++    assert len(intersections) == 1
++    assert (intersections[0].first_segment, intersections[0].second_segment) == (0, 1)
++    np.testing.assert_allclose(intersections[0].xy, [1.0, 0.0])
++
++
++def test_polyline_self_intersections_validate_input_and_tolerance():
++    with pytest.raises(ValueError, match="at least two"):
++        polyline_self_intersections([[0.0, 0.0]])
++    with pytest.raises(ValueError, match="finite and nonnegative"):
++        polyline_self_intersections([[0.0, 0.0], [1.0, 0.0]], tolerance=np.inf)
+diff --git a/tests/test_trajectory_chain.py b/tests/test_trajectory_chain.py
+new file mode 100644
+index 0000000..e68afe4
+--- /dev/null
++++ b/tests/test_trajectory_chain.py
+@@ -0,0 +1,114 @@
++from __future__ import annotations
++
++import numpy as np
++import pytest
++
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Pose2D,
++    Trajectory2D,
++    evaluate_trajectory,
++    trajectory_to_cubic_path,
++)
++from planarcurve.trajectory_chain import (
++    DirectedTrajectory,
++    TrajectoryChain,
++    evaluate_trajectory_chain,
++    reverse_trajectory,
++    trajectory_chain_to_cubic_path,
++)
++
++
++def _profile(*, turn: float, interpolation: str = "cubic-hermite") -> HeadingRateProfile:
++    return HeadingRateProfile(
++        start_rate_deg_per_u=turn,
++        end_rate_deg_per_u=turn,
++        changes=(HeadingRateChange(0.35, turn), HeadingRateChange(0.72, turn)),
++        interpolation=interpolation,
++    )
++
++
++@pytest.mark.parametrize("interpolation", ["linear", "cubic-hermite"])
++def test_reverse_trajectory_matches_reversed_samples_after_rigid_alignment(interpolation):
++    trajectory = Trajectory2D(
++        length=4.0,
++        start_heading_deg=-23.0,
++        heading_rate=HeadingRateProfile(
++            start_rate_deg_per_u=20.0,
++            end_rate_deg_per_u=-10.0,
++            changes=(HeadingRateChange(0.27, 65.0), HeadingRateChange(0.81, -35.0)),
++            interpolation=interpolation,
++        ),
++    )
++    original = evaluate_trajectory(trajectory, count=101)
++    reverse = evaluate_trajectory(reverse_trajectory(trajectory), count=101)
++
++    np.testing.assert_allclose(reverse.xy, original.xy[::-1] - original.xy[-1], atol=2e-8)
++    np.testing.assert_allclose(reverse.heading_deg, original.heading_deg[::-1] + 180.0)
++    np.testing.assert_allclose(
++        reverse.heading_rate_deg_per_u, -original.heading_rate_deg_per_u[::-1]
++    )
++
++
++def test_evaluate_chain_propagates_pose_and_preserves_segment_boundaries_and_turns():
++    first = Trajectory2D(2.0, 0.0, _profile(turn=90.0, interpolation="linear"))
++    second = Trajectory2D(3.0, 35.0, _profile(turn=-20.0, interpolation="linear"))
++    start_pose = Pose2D(np.array([10.0, -4.0]), 20.0, 0.0)
++    chain = TrajectoryChain((DirectedTrajectory(first), DirectedTrajectory(second)))
++
++    sample = evaluate_trajectory_chain(chain, samples_per_segment=3, start_pose=start_pose)
++
++    np.testing.assert_allclose(sample.xy[0], start_pose.position)
++    np.testing.assert_allclose(sample.xy[2], sample.xy[3])
++    np.testing.assert_allclose(sample.arc_length, [0.0, 1.0, 2.0, 2.0, 3.5, 5.0])
++    np.testing.assert_array_equal(sample.segment_index, [0, 0, 0, 1, 1, 1])
++    np.testing.assert_allclose(sample.segment_u, [0.0, 0.5, 1.0, 0.0, 0.5, 1.0])
++    np.testing.assert_allclose(
++        sample.tangent[2],
++        [np.cos(np.deg2rad(110.0)), np.sin(np.deg2rad(110.0))],
++    )
++    np.testing.assert_allclose(
++        sample.tangent[3],
++        [np.cos(np.deg2rad(145.0)), np.sin(np.deg2rad(145.0))],
++    )
++    assert sample.end_pose.heading_deg == pytest.approx(125.0)
++
++
++def test_reversed_directed_segment_is_evaluated_in_reverse():
++    trajectory = Trajectory2D(2.0, 0.0, _profile(turn=60.0, interpolation="linear"))
++    reversed_trajectory = reverse_trajectory(trajectory)
++    chain = TrajectoryChain((DirectedTrajectory(trajectory, reversed=True),))
++    pose = Pose2D(np.zeros(2), 0.0, 0.0)
++
++    actual = evaluate_trajectory_chain(chain, samples_per_segment=9, start_pose=pose)
++    local = evaluate_trajectory(reversed_trajectory, count=9)
++    angle = np.deg2rad(-reversed_trajectory.start_heading_deg)
++    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
++
++    np.testing.assert_allclose(actual.xy, local.xy @ rotation.T, atol=2e-8)
++
++
++def test_trajectory_chain_converts_to_connected_cubic_path():
++    first = Trajectory2D(2.0, 0.0, _profile(turn=45.0, interpolation="linear"))
++    second = Trajectory2D(1.5, 15.0, _profile(turn=-10.0, interpolation="linear"))
++    chain = TrajectoryChain((DirectedTrajectory(first), DirectedTrajectory(second)))
++    start_pose = Pose2D(np.array([3.0, 7.0]), 30.0, 0.0)
++
++    sample = evaluate_trajectory_chain(chain, samples_per_segment=5, start_pose=start_pose)
++    path = trajectory_chain_to_cubic_path(chain, start_pose=start_pose, max_error=1e-4)
++    first_path = trajectory_to_cubic_path(first, max_error=1e-4)
++
++    assert path.start == (3.0, 7.0)
++    np.testing.assert_allclose(path.segments[len(first_path.segments) - 1].end, sample.xy[4])
++    np.testing.assert_allclose(path.segments[-1].end, sample.xy[-1], atol=2e-8)
++
++
++def test_trajectory_chain_apis_are_exported_at_package_root():
++    import planarcurve
++
++    assert planarcurve.DirectedTrajectory is DirectedTrajectory
++    assert planarcurve.TrajectoryChain is TrajectoryChain
++    assert planarcurve.evaluate_trajectory_chain is evaluate_trajectory_chain
++    assert planarcurve.reverse_trajectory is reverse_trajectory
++    assert planarcurve.trajectory_chain_to_cubic_path is trajectory_chain_to_cubic_path
+diff --git a/tests/test_transforms.py b/tests/test_transforms.py
+index 777df3a..2b2624b 100644
+--- a/tests/test_transforms.py
++++ b/tests/test_transforms.py
+@@ -3,7 +3,7 @@ from __future__ import annotations
+ import numpy as np
+ import pytest
+
+-from planarcurve.transforms import Affine2D, Similarity2D
++from planarcurve.transforms import Affine2D, Similarity2D, fit_similarity_transform
+
+
+ def test_affine_inverse_and_composition_order():
+@@ -35,6 +35,106 @@ def test_singular_affine_inverse_rejected():
+         Affine2D(1.0, 2.0, 2.0, 4.0).inverse()
+
+
++@pytest.mark.parametrize(
++    "transform",
++    [
++        Similarity2D(dx=3.0, dy=-4.0),
++        Similarity2D(rotation_deg=37.0),
++        Similarity2D(scale=2.4),
++        Similarity2D(scale=0.65, rotation_deg=-22.0, dx=-4.0, dy=11.0),
++    ],
++)
++def test_fit_similarity_transform_maps_sample_points_to_reference(transform):
++    reference = np.array([[0.0, 0.0], [2.0, 1.0], [-1.0, 4.0], [5.0, -2.0]])
++    sample = transform.apply(reference)
++
++    fitted = fit_similarity_transform(reference, sample)
++
++    np.testing.assert_allclose(fitted.apply(sample), reference, atol=1e-12)
++
++
++def test_fit_similarity_transform_rejects_degenerate_and_nonfinite_points():
++    with pytest.raises(ValueError, match="share shape"):
++        fit_similarity_transform(np.zeros((2, 2)), np.zeros((3, 2)))
++    with pytest.raises(ValueError, match="finite"):
++        fit_similarity_transform([[0.0, 0.0], [np.inf, 1.0]], [[0.0, 0.0], [1.0, 1.0]])
++    with pytest.raises(ValueError, match="nonzero spatial extent"):
++        fit_similarity_transform(np.zeros((2, 2)), [[0.0, 0.0], [1.0, 1.0]])
++
++
++def test_fit_similarity_transform_does_not_reflect():
++    reference = np.array([[0.0, 0.0], [1.0, 0.5], [2.0, 3.0], [4.0, 1.0]])
++    reflected = reference.copy()
++    reflected[:, 1] *= -1.0
++
++    fitted = fit_similarity_transform(reference, reflected)
++
++    assert fitted.scale > 0.0
++    assert np.mean(np.sum((reference - fitted.apply(reflected)) ** 2, axis=1)) > 1.0
++
++
++def test_fit_similarity_transform_weighted_and_noisy_recovery():
++    source = np.array([[0.0, 0.0], [2.0, 1.0], [-1.0, 4.0], [5.0, -2.0]])
++    source[-1] = [1e12, -2e12]
++    expected = Similarity2D(scale=1.7, rotation_deg=28.0, dx=-3.0, dy=5.0)
++    target = expected.apply(source)
++    target[-1] += [100.0, -80.0]
++
++    fitted = fit_similarity_transform(target, source, weights=np.array([1.0, 1.0, 1.0, 0.0]))
++
++    np.testing.assert_allclose(fitted.apply(source[:3]), expected.apply(source[:3]), atol=1e-12)
++    assert (
++        fit_similarity_transform(target=target, source=source, weights=[1.0, 1.0, 1.0, 0.0])
++        == fitted
++    )
++    noisy_source = source[:3]
++
++    noisy_target = expected.apply(noisy_source) + np.random.default_rng(17).normal(
++        scale=0.01, size=noisy_source.shape
++    )
++    noisy_fit = fit_similarity_transform(noisy_target, noisy_source)
++    residual = noisy_fit.apply(noisy_source) - noisy_target
++    assert np.sqrt(np.mean(np.sum(residual**2, axis=1))) < 0.02
++
++
++def test_fit_similarity_transform_rejects_invalid_weights_and_degenerate_points():
++    source = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
++    target = source.copy()
++    with pytest.raises(ValueError, match="N >= 2"):
++        fit_similarity_transform(target[:1], source[:1])
++    with pytest.raises(ValueError, match="source points must have nonzero spatial extent"):
++        fit_similarity_transform(target, np.zeros_like(source))
++    for weights, message in (
++        ([1.0, 1.0], "shape"),
++        ([0.0, 0.0, 0.0], "positive total"),
++        ([1.0, -1.0, 1.0], "nonnegative"),
++        ([1.0, np.inf, 1.0], "finite"),
++    ):
++        with pytest.raises(ValueError, match=message):
++            fit_similarity_transform(target, source, weights=weights)
++
++    with pytest.raises(ValueError, match="nonzero spatial extent"):
++        fit_similarity_transform(np.zeros((3, 2)), source)
++
++
++def test_fit_similarity_transform_rejects_numerically_singular_reflection():
++    target = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
++    source = target.copy()
++    source[:, 1] *= -1.0
++
++    with pytest.raises(ValueError, match="numerically singular"):
++        fit_similarity_transform(target, source)
++
++
++def test_fit_similarity_transform_does_not_special_case_reversed_correspondence_order():
++    target = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 1.0], [3.0, 0.0]])
++    source = target[::-1]
++
++    fitted = fit_similarity_transform(target, source)
++
++    assert np.mean(np.sum((target - fitted.apply(source)) ** 2, axis=1)) > 0.1
++
++
+ def test_similarity_affine_conversion_is_consistent():
+     similarity = Similarity2D(scale=1.75, rotation_deg=37.0, dx=5.0, dy=-8.0)
+     points = np.array([[0.0, 1.0], [2.0, -3.0]])
