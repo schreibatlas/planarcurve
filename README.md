@@ -23,9 +23,10 @@ For development, install `planarcurve[dev]`.
 ## API map
 
 ```text
-planarcurve.polyline       lengths, resampling, projection, scoring
+planarcurve.polyline       lengths, resampling, projection, intersections, scoring
 planarcurve.bezier         evaluation, derivatives, curvature, flattening
 planarcurve.trajectory     normalized heading-rate trajectories
+planarcurve.trajectory_chain  directed segments, pose propagation, chain sampling
 planarcurve.transforms     affine and similarity transforms
 planarcurve.spline         cubic B-splines and cubic-path conversion (SciPy)
 planarcurve.fitting        spline and trajectory fitting (SciPy)
@@ -70,6 +71,10 @@ print(sample.xy[-1], trajectory_total_turn(trajectory))
 ```
 
 Here `u` is normalized progress in `[0, 1]`. Heading rates are degrees per unit progress. Geometric curvature is signed inverse length and equals `radians(heading_rate) / trajectory.length`.
+
+## Directed trajectory chains
+
+`TrajectoryChain` composes generic `Trajectory2D` segments in either direction. Reversal uses the heading-rate profile, and chain samples preserve segment boundaries, tangent changes, and cumulative arc length. `trajectory_chain_to_cubic_path()` provides a connected cubic representation. These primitives contain no application-specific movement semantics.
 
 ## Fitting
 ## Fitting

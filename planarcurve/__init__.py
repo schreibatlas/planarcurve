@@ -17,7 +17,15 @@ from .trajectory import (
     trajectory_to_cubic_path,
     trajectory_total_turn,
 )
-from .transforms import Affine2D, Similarity2D
+from .trajectory_chain import (
+    DirectedTrajectory,
+    TrajectoryChain,
+    TrajectoryChainSample,
+    evaluate_trajectory_chain,
+    reverse_trajectory,
+    trajectory_chain_to_cubic_path,
+)
+from .transforms import Affine2D, Similarity2D, fit_similarity_transform
 from .types import (
     CubicBezier,
     CubicPath,
@@ -46,6 +54,7 @@ __all__ = [
     "PointLike",
     "Pose2D",
     "Similarity2D",
+    "fit_similarity_transform",
     "Trajectory2D",
     "TrajectorySample",
     "__version__",
@@ -59,4 +68,10 @@ __all__ = [
     "trajectory_end_pose",
     "trajectory_to_cubic_path",
     "trajectory_total_turn",
+    "DirectedTrajectory",
+    "TrajectoryChain",
+    "TrajectoryChainSample",
+    "evaluate_trajectory_chain",
+    "reverse_trajectory",
+    "trajectory_chain_to_cubic_path",
 ]

@@ -165,3 +165,101 @@ class Similarity2D:
     def apply(self, points: ArrayLike) -> FloatArray:
         """Apply the similarity transform to one or more points."""
         return self.as_affine().apply(points)
+
+
+def fit_similarity_transform(
+    target: ArrayLike,
+    source: ArrayLike,
+    *,
+    weights: ArrayLike | None = None,
+) -> Similarity2D:
+    """Fit an orientation-preserving similarity mapping ``source`` onto ``target``.
+
+    The fitted transform has positive uniform scale, rotation, and translation.
+    Reflections are not representable by :class:`Similarity2D` and are never
+    fitted. Optional nonnegative weights assign each point pair's relative
+    contribution to the least-squares fit.
+    """
+    target_values = np.asarray(target, dtype=float)
+    source_values = np.asarray(source, dtype=float)
+    if (
+        target_values.ndim != 2
+        or target_values.shape[1] != 2
+        or source_values.shape != target_values.shape
+        or len(target_values) < 2
+    ):
+        raise ValueError("target and source points must share shape (N, 2), with N >= 2")
+    if not np.isfinite(target_values).all() or not np.isfinite(source_values).all():
+        raise ValueError("similarity-fit points must contain finite coordinates")
+
+    if weights is None:
+        fit_weights = np.ones(len(target_values), dtype=float)
+    else:
+        fit_weights = np.asarray(weights, dtype=float)
+        if fit_weights.shape != (len(target_values),):
+            raise ValueError("weights must have shape (N,)")
+        if not np.isfinite(fit_weights).all() or np.any(fit_weights < 0.0):
+            raise ValueError("weights must be finite and nonnegative")
+    maximum_weight = float(np.max(fit_weights))
+    if maximum_weight == 0.0:
+        raise ValueError("weights must have positive total weight")
+    fit_weights = fit_weights / maximum_weight
+    fit_weights /= fit_weights.sum()
+    active = fit_weights > 0.0
+    fit_weights = fit_weights[active]
+    source_values = source_values[active]
+    target_values = target_values[active]
+
+    first = int(np.flatnonzero(fit_weights)[0])
+    source_origin = source_values[first]
+    target_origin = target_values[first]
+    with np.errstate(over="ignore", invalid="ignore"):
+        source_offsets = source_values - source_origin
+        target_offsets = target_values - target_origin
+    if not np.isfinite(source_offsets).all() or not np.isfinite(target_offsets).all():
+        raise ValueError("similarity fit is numerically singular")
+
+    source_extent = float(np.max(np.abs(source_offsets)))
+    if source_extent == 0.0:
+        raise ValueError("source points must have nonzero spatial extent")
+    target_extent = float(np.max(np.abs(target_offsets)))
+    if target_extent == 0.0:
+        raise ValueError("target points must have nonzero spatial extent")
+
+    source_scaled = source_offsets / source_extent
+    target_scaled = target_offsets / target_extent
+    source_mean_scaled = fit_weights @ source_scaled
+    target_mean_scaled = fit_weights @ target_scaled
+    source_centered = source_scaled - source_mean_scaled
+    target_centered = target_scaled - target_mean_scaled
+    source_variance = float(np.sum(fit_weights * np.sum(source_centered**2, axis=1)))
+    target_variance = float(np.sum(fit_weights * np.sum(target_centered**2, axis=1)))
+    if not np.isfinite(source_variance) or source_variance <= np.finfo(float).eps:
+        raise ValueError("source points must have nonzero spatial extent")
+    if not np.isfinite(target_variance) or target_variance <= np.finfo(float).eps:
+        raise ValueError("similarity fit is numerically singular")
+
+    covariance = source_centered.T @ (fit_weights[:, None] * target_centered)
+    left, _, right_t = np.linalg.svd(covariance)
+    correction = np.eye(2)
+    correction[-1, -1] = 1.0 if np.linalg.det(left @ right_t) >= 0.0 else -1.0
+    row_rotation = left @ correction @ right_t
+    score = float(np.sum(fit_weights[:, None] * (source_centered @ row_rotation) * target_centered))
+    singularity_threshold = np.finfo(float).eps * np.sqrt(source_variance * target_variance)
+    if not np.isfinite(score) or score <= singularity_threshold:
+        raise ValueError("similarity fit is numerically singular")
+
+    normalized_scale = score / source_variance
+    scale = (target_extent / source_extent) * normalized_scale
+    source_mean = source_origin + source_extent * source_mean_scaled
+    target_mean = target_origin + target_extent * target_mean_scaled
+    translation = target_mean - scale * (source_mean @ row_rotation)
+    if not np.isfinite(scale) or scale <= 0.0 or not np.isfinite(translation).all():
+        raise ValueError("similarity fit is numerically singular")
+    rotation_deg = float(np.degrees(np.arctan2(row_rotation[0, 1], row_rotation[0, 0])))
+    return Similarity2D(
+        scale=float(scale),
+        rotation_deg=rotation_deg,
+        dx=float(translation[0]),
+        dy=float(translation[1]),
+    )

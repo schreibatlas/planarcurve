@@ -2,6 +2,22 @@
 
 Fitting is optional and requires SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. The package provides two separate workflows: fitting shared B-spline control points, and fitting a normalized heading-rate trajectory with occurrence placement transforms.
 
+## Stable trajectory fitting imports
+
+The stable trajectory-fitting API is exported from `planarcurve.fitting`:
+
+```python
+from planarcurve.fitting import (
+    SharedTrajectoryFitResult,
+    TrajectoryFitOptions,
+    TrajectoryFitResult,
+    fit_shared_trajectory_profile,
+    fit_trajectory,
+)
+```
+
+These imports require SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. Low-level initialization helpers remain in `planarcurve.fitting.trajectory` and are not part of this package-level export.
+
 ## Fit spline control points
 
 A `SplineObservation` pairs parameter values `u` with observed 2D points `xy`. Optional nonnegative per-point weights control each observation's contribution. Multiple observations may be combined to solve one shared control-point set against the same spline basis.

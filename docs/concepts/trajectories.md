@@ -35,3 +35,10 @@ Use `evaluate_trajectory_at()` for arbitrary `u` values or `sample_trajectory_by
 ## Conversion to cubic Beziers
 
 `trajectory_to_cubic_path()` adaptively subdivides profile intervals. It compares the cubic approximation with the numerically evaluated trajectory at the quarter, midpoint, and three-quarter parameters. `max_error` is therefore a sampled acceptance criterion, not a proof of a continuous global Hausdorff error bound.
+
+
+## Reverse traversal and trajectory chains
+
+`reverse_trajectory()` builds the reversed heading-rate profile using `heading_rev(u) = heading(1-u) + 180°` and `rate_rev(u) = -rate(1-u)`. It does not reverse a sampled point array. The resulting trajectory starts at its own origin and matches the original curve traversed backward after rigid alignment.
+
+A `TrajectoryChain` is an ordered sequence of `DirectedTrajectory` values. The first segment is aligned to the requested starting pose. Each following segment starts at the previous endpoint, while its local starting heading remains an offset in the propagated frame. Position joins are exact by construction, and tangent discontinuities are retained rather than smoothed. Chain samples include both sides of each join, along with segment index, segment progress, and global cumulative arc length. Use `trajectory_chain_to_cubic_path()` for a connected cubic representation.

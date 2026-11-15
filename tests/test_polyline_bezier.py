@@ -23,6 +23,7 @@ from planarcurve.polyline import (
     mean_squared_turn_angle,
     normalized_arclength,
     polyline_length,
+    polyline_self_intersections,
     project_points_to_polyline,
     resample_polyline_by_arclength,
     symmetric_polyline_distance,
@@ -146,3 +147,43 @@ def test_integer_parameters_and_point_dimensions_are_validated():
         CubicBezier((0.0, 0.0, 99.0), (1, 0), (2, 0), (3, 0))
     with pytest.raises(ValueError, match="samples"):
         symmetric_polyline_distance(line, line, samples=3.5)
+
+
+def test_polyline_self_intersections_skip_shared_joins_and_find_crossings():
+    ordinary_join = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
+    assert polyline_self_intersections(ordinary_join) == ()
+
+    crossing = np.array([[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]])
+    intersections = polyline_self_intersections(crossing)
+    assert len(intersections) == 1
+    assert intersections[0].first_segment == 0
+    assert intersections[0].second_segment == 2
+    np.testing.assert_allclose(intersections[0].xy, [1.0, 1.0])
+
+
+def test_polyline_self_intersections_observe_closed_loop_semantics():
+    repeated_endpoint = np.array([[0.0, 0.0], [2.0, 0.0], [1.0, 1.0], [0.0, 0.0]])
+
+    open_result = polyline_self_intersections(repeated_endpoint)
+    assert [(hit.first_segment, hit.second_segment) for hit in open_result] == [(0, 2)]
+    assert polyline_self_intersections(repeated_endpoint, closed=True) == ()
+
+    implicit_loop = repeated_endpoint[:-1]
+    assert polyline_self_intersections(implicit_loop, closed=True) == ()
+
+
+def test_polyline_self_intersections_report_collinear_adjacent_overlap():
+    retraced = np.array([[0.0, 0.0], [3.0, 0.0], [1.0, 0.0]])
+
+    intersections = polyline_self_intersections(retraced)
+
+    assert len(intersections) == 1
+    assert (intersections[0].first_segment, intersections[0].second_segment) == (0, 1)
+    np.testing.assert_allclose(intersections[0].xy, [1.0, 0.0])
+
+
+def test_polyline_self_intersections_validate_input_and_tolerance():
+    with pytest.raises(ValueError, match="at least two"):
+        polyline_self_intersections([[0.0, 0.0]])
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        polyline_self_intersections([[0.0, 0.0], [1.0, 0.0]], tolerance=np.inf)

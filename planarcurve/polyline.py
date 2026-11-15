@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .types import FloatArray, _require_integer
+from .types import FloatArray, Point2D, _require_integer
 
 
 def _points(values: ArrayLike) -> FloatArray:
@@ -215,3 +215,158 @@ def closest_point_on_polyline(point: ArrayLike, polyline: ArrayLike) -> FloatArr
     if query.shape != (2,):
         raise ValueError("point must have shape (2,)")
     return project_points_to_polyline(query[None, :], polyline).point[0]
+
+
+@dataclass(frozen=True)
+class PolylineIntersection:
+    """One self-intersection between two polyline segments.
+
+    Segment indices are zero-based. For a collinear overlap, ``xy`` is the
+    first point of overlap along ``first_segment``.
+    """
+
+    first_segment: int
+    second_segment: int
+    xy: Point2D
+
+
+def _cross_2d(first: FloatArray, second: FloatArray) -> float:
+    return float(first[0] * second[1] - first[1] * second[0])
+
+
+def _project_to_segment(point: FloatArray, start: FloatArray, vector: FloatArray) -> FloatArray:
+    squared_length = float(vector @ vector)
+    if squared_length == 0.0:
+        return start
+    parameter = float(np.clip((point - start) @ vector / squared_length, 0.0, 1.0))
+    return start + parameter * vector
+
+
+def _segment_intersection(
+    first_start: FloatArray,
+    first_end: FloatArray,
+    second_start: FloatArray,
+    second_end: FloatArray,
+    tolerance: float,
+) -> tuple[FloatArray, float] | None:
+    first_vector = first_end - first_start
+    second_vector = second_end - second_start
+    first_length = float(np.linalg.norm(first_vector))
+    second_length = float(np.linalg.norm(second_vector))
+
+    if first_length <= tolerance:
+        if second_length <= tolerance:
+            if np.linalg.norm(first_start - second_start) <= tolerance:
+                return (first_start + second_start) / 2.0, 0.0
+            return None
+        projected = _project_to_segment(first_start, second_start, second_vector)
+        if np.linalg.norm(first_start - projected) <= tolerance:
+            return (first_start + projected) / 2.0, 0.0
+        return None
+    if second_length <= tolerance:
+        projected = _project_to_segment(second_start, first_start, first_vector)
+        if np.linalg.norm(second_start - projected) <= tolerance:
+            return (second_start + projected) / 2.0, 0.0
+        return None
+
+    offset = second_start - first_start
+    denominator = _cross_2d(first_vector, second_vector)
+    parallel_threshold = tolerance * (first_length + second_length)
+    if abs(denominator) > parallel_threshold:
+        first_parameter = _cross_2d(offset, second_vector) / denominator
+        second_parameter = _cross_2d(offset, first_vector) / denominator
+        first_margin = tolerance / first_length
+        second_margin = tolerance / second_length
+        if not (
+            -first_margin <= first_parameter <= 1.0 + first_margin
+            and -second_margin <= second_parameter <= 1.0 + second_margin
+        ):
+            return None
+        first_point = first_start + np.clip(first_parameter, 0.0, 1.0) * first_vector
+        second_point = second_start + np.clip(second_parameter, 0.0, 1.0) * second_vector
+        if np.linalg.norm(first_point - second_point) <= tolerance:
+            return (first_point + second_point) / 2.0, 0.0
+        return None
+
+    first_line_distance = abs(_cross_2d(offset, first_vector)) / first_length
+    second_line_distance = abs(_cross_2d(second_end - first_start, first_vector)) / first_length
+    if max(first_line_distance, second_line_distance) > tolerance:
+        return None
+
+    first_axis = first_vector / first_length
+    second_low = float((second_start - first_start) @ first_axis)
+    second_high = float((second_end - first_start) @ first_axis)
+    overlap_low = max(0.0, min(second_low, second_high))
+    overlap_high = min(first_length, max(second_low, second_high))
+    if overlap_high < overlap_low - tolerance:
+        return None
+
+    overlap_length = max(0.0, overlap_high - overlap_low)
+    if overlap_high >= overlap_low:
+        point = first_start + overlap_low * first_axis
+    else:
+        midpoint = np.clip((overlap_low + overlap_high) / 2.0, 0.0, first_length)
+        first_point = first_start + midpoint * first_axis
+        second_point = _project_to_segment(first_point, second_start, second_vector)
+        point = (first_point + second_point) / 2.0
+    return point, overlap_length
+
+
+def polyline_self_intersections(
+    points: ArrayLike,
+    *,
+    closed: bool = False,
+    tolerance: float = 1e-9,
+) -> tuple[PolylineIntersection, ...]:
+    """Return intersections between nontrivial pairs of polyline segments.
+
+    Consecutive segments that meet only at their shared endpoint are not
+    reported. With ``closed=True``, an implicit last-to-first segment is added
+    unless the input already repeats its first point, and the first and last
+    segments are treated as adjacent. A repeated endpoint is therefore an
+    intersection when ``closed=False`` but an ordinary loop join when
+    ``closed=True``. Collinear overlap is conservatively reported; ``xy`` is
+    the first point of overlap along the first segment. ``tolerance`` is an
+    absolute coordinate-space tolerance and may be zero.
+    """
+    vertices = _points(points)
+    if len(vertices) < 2:
+        raise ValueError("self-intersection detection requires at least two points")
+    if not np.isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError("tolerance must be finite and nonnegative")
+
+    segments = list(zip(vertices[:-1], vertices[1:], strict=True))
+    if closed and not np.array_equal(vertices[0], vertices[-1]):
+        segments.append((vertices[-1], vertices[0]))
+
+    intersections = []
+    segment_count = len(segments)
+    for first_index in range(segment_count):
+        first_start, first_end = segments[first_index]
+        for second_index in range(first_index + 1, segment_count):
+            second_start, second_end = segments[second_index]
+            hit = _segment_intersection(
+                first_start,
+                first_end,
+                second_start,
+                second_end,
+                tolerance,
+            )
+            if hit is None:
+                continue
+            point, overlap_length = hit
+            adjacent = second_index == first_index + 1 or (
+                closed and first_index == 0 and second_index == segment_count - 1
+            )
+            if adjacent and overlap_length <= tolerance:
+                shared = first_end if second_index == first_index + 1 else first_start
+                if np.linalg.norm(point - shared) <= tolerance:
+                    continue
+            intersections.append(
+                PolylineIntersection(
+                    first_segment=first_index,
+                    second_segment=second_index,
+                    xy=(float(point[0]), float(point[1])),
+                )
+            )
+    return tuple(intersections)

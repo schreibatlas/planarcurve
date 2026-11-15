@@ -200,3 +200,20 @@ def test_fitted_profile_is_invariant_to_coordinate_scale_and_rotation():
 
     for signature in signatures[1:]:
         np.testing.assert_allclose(signature, signatures[0], rtol=0.1, atol=3.0)
+
+
+def test_fitting_package_exports_stable_trajectory_api():
+    import importlib
+
+    public = importlib.import_module("planarcurve.fitting")
+    implementation = importlib.import_module("planarcurve.fitting.trajectory")
+    public_names = (
+        "SharedTrajectoryFitResult",
+        "TrajectoryFitOptions",
+        "TrajectoryFitResult",
+        "fit_shared_trajectory_profile",
+        "fit_trajectory",
+    )
+
+    for name in public_names:
+        assert getattr(public, name) is getattr(implementation, name)

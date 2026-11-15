@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from planarcurve.transforms import Affine2D, Similarity2D
+from planarcurve.transforms import Affine2D, Similarity2D, fit_similarity_transform
 
 
 def test_affine_inverse_and_composition_order():
@@ -33,6 +33,106 @@ def test_affine_vectors_and_constructors():
 def test_singular_affine_inverse_rejected():
     with pytest.raises(ValueError, match="singular"):
         Affine2D(1.0, 2.0, 2.0, 4.0).inverse()
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        Similarity2D(dx=3.0, dy=-4.0),
+        Similarity2D(rotation_deg=37.0),
+        Similarity2D(scale=2.4),
+        Similarity2D(scale=0.65, rotation_deg=-22.0, dx=-4.0, dy=11.0),
+    ],
+)
+def test_fit_similarity_transform_maps_sample_points_to_reference(transform):
+    reference = np.array([[0.0, 0.0], [2.0, 1.0], [-1.0, 4.0], [5.0, -2.0]])
+    sample = transform.apply(reference)
+
+    fitted = fit_similarity_transform(reference, sample)
+
+    np.testing.assert_allclose(fitted.apply(sample), reference, atol=1e-12)
+
+
+def test_fit_similarity_transform_rejects_degenerate_and_nonfinite_points():
+    with pytest.raises(ValueError, match="share shape"):
+        fit_similarity_transform(np.zeros((2, 2)), np.zeros((3, 2)))
+    with pytest.raises(ValueError, match="finite"):
+        fit_similarity_transform([[0.0, 0.0], [np.inf, 1.0]], [[0.0, 0.0], [1.0, 1.0]])
+    with pytest.raises(ValueError, match="nonzero spatial extent"):
+        fit_similarity_transform(np.zeros((2, 2)), [[0.0, 0.0], [1.0, 1.0]])
+
+
+def test_fit_similarity_transform_does_not_reflect():
+    reference = np.array([[0.0, 0.0], [1.0, 0.5], [2.0, 3.0], [4.0, 1.0]])
+    reflected = reference.copy()
+    reflected[:, 1] *= -1.0
+
+    fitted = fit_similarity_transform(reference, reflected)
+
+    assert fitted.scale > 0.0
+    assert np.mean(np.sum((reference - fitted.apply(reflected)) ** 2, axis=1)) > 1.0
+
+
+def test_fit_similarity_transform_weighted_and_noisy_recovery():
+    source = np.array([[0.0, 0.0], [2.0, 1.0], [-1.0, 4.0], [5.0, -2.0]])
+    source[-1] = [1e12, -2e12]
+    expected = Similarity2D(scale=1.7, rotation_deg=28.0, dx=-3.0, dy=5.0)
+    target = expected.apply(source)
+    target[-1] += [100.0, -80.0]
+
+    fitted = fit_similarity_transform(target, source, weights=np.array([1.0, 1.0, 1.0, 0.0]))
+
+    np.testing.assert_allclose(fitted.apply(source[:3]), expected.apply(source[:3]), atol=1e-12)
+    assert (
+        fit_similarity_transform(target=target, source=source, weights=[1.0, 1.0, 1.0, 0.0])
+        == fitted
+    )
+    noisy_source = source[:3]
+
+    noisy_target = expected.apply(noisy_source) + np.random.default_rng(17).normal(
+        scale=0.01, size=noisy_source.shape
+    )
+    noisy_fit = fit_similarity_transform(noisy_target, noisy_source)
+    residual = noisy_fit.apply(noisy_source) - noisy_target
+    assert np.sqrt(np.mean(np.sum(residual**2, axis=1))) < 0.02
+
+
+def test_fit_similarity_transform_rejects_invalid_weights_and_degenerate_points():
+    source = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    target = source.copy()
+    with pytest.raises(ValueError, match="N >= 2"):
+        fit_similarity_transform(target[:1], source[:1])
+    with pytest.raises(ValueError, match="source points must have nonzero spatial extent"):
+        fit_similarity_transform(target, np.zeros_like(source))
+    for weights, message in (
+        ([1.0, 1.0], "shape"),
+        ([0.0, 0.0, 0.0], "positive total"),
+        ([1.0, -1.0, 1.0], "nonnegative"),
+        ([1.0, np.inf, 1.0], "finite"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            fit_similarity_transform(target, source, weights=weights)
+
+    with pytest.raises(ValueError, match="nonzero spatial extent"):
+        fit_similarity_transform(np.zeros((3, 2)), source)
+
+
+def test_fit_similarity_transform_rejects_numerically_singular_reflection():
+    target = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]])
+    source = target.copy()
+    source[:, 1] *= -1.0
+
+    with pytest.raises(ValueError, match="numerically singular"):
+        fit_similarity_transform(target, source)
+
+
+def test_fit_similarity_transform_does_not_special_case_reversed_correspondence_order():
+    target = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 1.0], [3.0, 0.0]])
+    source = target[::-1]
+
+    fitted = fit_similarity_transform(target, source)
+
+    assert np.mean(np.sum((target - fitted.apply(source)) ** 2, axis=1)) > 0.1
 
 
 def test_similarity_affine_conversion_is_consistent():
