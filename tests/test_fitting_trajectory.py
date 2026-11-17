@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from planarcurve.fitting.parameters import HeadingRateParameterization
 from planarcurve.fitting.trajectory import (
     TrajectoryFitOptions,
-    _ProfileCodec,
     estimate_heading_rate,
     estimate_polyline_heading,
     fit_shared_trajectory_profile,
@@ -161,18 +161,45 @@ def test_change_position_initialization_stays_strictly_inside_interval():
     assert np.all(np.diff(positions) >= 0.02)
 
 
-def test_profile_codec_uses_only_identifiable_position_logits():
+def test_public_profile_parameterization_uses_identifiable_position_logits():
     for change_count in (0, 2):
-        codec = _ProfileCodec(TrajectoryFitOptions(change_count=change_count))
         positions = np.linspace(0.3, 0.7, change_count)
         rates = np.linspace(-20.0, 20.0, change_count + 2)
-        encoded = codec.encode(positions, rates)
-        decoded_positions, decoded_rates = codec.decode(encoded)
+        changes = tuple(
+            HeadingRateChange(float(at), float(rate))
+            for at, rate in zip(positions, rates[1:-1], strict=True)
+        )
+        for interpolation in ("linear", "cubic-hermite"):
+            profile = HeadingRateProfile(
+                start_rate_deg_per_u=float(rates[0]),
+                changes=changes,
+                end_rate_deg_per_u=float(rates[-1]),
+                interpolation=interpolation,
+            )
+            codec = HeadingRateParameterization(
+                change_count=change_count,
+                min_change_spacing=0.02,
+                max_heading_rate_deg_per_u=100.0,
+                interpolation=interpolation,
+            )
+            encoded = codec.encode(profile)
+            decoded = codec.decode(encoded)
 
-        assert encoded.size == change_count + change_count + 2
-        np.testing.assert_allclose(decoded_positions, positions)
-        np.testing.assert_allclose(decoded_rates, rates)
-
+            assert codec.version == 1
+            assert encoded.size == 2 * change_count + 2
+            assert decoded.interpolation == interpolation
+            np.testing.assert_allclose(
+                [change.at for change in decoded.changes], positions, atol=1e-12
+            )
+            np.testing.assert_allclose(
+                [
+                    decoded.start_rate_deg_per_u,
+                    *(change.heading_rate_deg_per_u for change in decoded.changes),
+                    decoded.end_rate_deg_per_u,
+                ],
+                rates,
+                atol=1e-9,
+            )
 
 def test_fitted_profile_is_invariant_to_coordinate_scale_and_rotation():
     base_points = evaluate_trajectory(true_trajectory(), count=257).xy
@@ -217,3 +244,11 @@ def test_fitting_package_exports_stable_trajectory_api():
 
     for name in public_names:
         assert getattr(public, name) is getattr(implementation, name)
+
+
+
+def test_heading_rate_parameterization_is_exported_from_fitting_package():
+    from planarcurve.fitting import HeadingRateParameterization as exported
+    from planarcurve.fitting.parameters import HeadingRateParameterization as implementation
+
+    assert exported is implementation

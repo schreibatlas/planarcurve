@@ -9,6 +9,8 @@ python examples/spline_to_bezier.py
 python examples/svg_pipeline.py
 python examples/fit_polyline_to_spline.py
 python examples/fit_shared_trajectory.py
+python examples/fit_shared_trajectory_family.py
+python examples/select_trajectory_complexity.py
 ```
 
 | Example | Demonstrates | Optional dependency | Output |
@@ -19,5 +21,7 @@ python examples/fit_shared_trajectory.py
 | [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py) | Parsing, transforming, and resampling one SVG subpath | FontTools | Console |
 | [Spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) | Robust shared control-point fitting | SciPy | `fit_polyline_to_spline.svg` |
 | [Shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) | One normalized shape fitted to multiple occurrences | SciPy | `fit_shared_trajectory.svg` |
+| [Shared trajectory family fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and per-occurrence family diagnostics | SciPy | Console |
+| [Trajectory complexity selection](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py) | Deterministic model-order selection and decomposed costs | SciPy | Console |
 
 Assertions in the scripts check the numerical behavior each example demonstrates. SVG outputs are written to the current working directory.

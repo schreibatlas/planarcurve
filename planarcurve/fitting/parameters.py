@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import ClassVar, Literal
+
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..types import FloatArray
+from ..trajectory import HeadingRateChange, HeadingRateProfile
+from ..types import FloatArray, _require_integer
 
 
 def ordered_positions_from_logits(
@@ -111,3 +115,105 @@ def _validate_interval(low: float, high: float) -> None:
 def _validate_spacing(min_spacing: float) -> None:
     if not np.isfinite(min_spacing) or min_spacing < 0.0:
         raise ValueError("min_spacing must be finite and nonnegative")
+
+
+@dataclass(frozen=True)
+class HeadingRateParameterization:
+    """Version 1 codec for normalized heading-rate profile parameters.
+
+    The encoded vector stores ordered-position logits followed by bounded rate
+    logits. Interpolation is configuration, not encoded data, so encode and
+    decode require the configured interpolation kind to match the profile.
+    Rates decode strictly inside their configured symmetric bound.
+    """
+
+    change_count: int
+    min_change_spacing: float
+    max_heading_rate_deg_per_u: float
+    interpolation: Literal["linear", "cubic-hermite"] = "cubic-hermite"
+
+    version: ClassVar[int] = 1
+
+    def __post_init__(self) -> None:
+        count = _require_integer(self.change_count, name="change_count", minimum=0)
+        object.__setattr__(self, "change_count", count)
+        if not np.isfinite(self.min_change_spacing) or self.min_change_spacing < 0.0:
+            raise ValueError("min_change_spacing must be finite and nonnegative")
+        if (count - 1) * self.min_change_spacing >= 1.0:
+            raise ValueError("minimum spacing is too large for the requested changes")
+        if (
+            not np.isfinite(self.max_heading_rate_deg_per_u)
+            or self.max_heading_rate_deg_per_u <= 0.0
+        ):
+            raise ValueError("maximum heading rate must be positive and finite")
+        if self.interpolation not in {"linear", "cubic-hermite"}:
+            raise ValueError("interpolation must be 'linear' or 'cubic-hermite'")
+
+    @property
+    def size(self) -> int:
+        """Number of scalar values in the encoded vector."""
+        return 2 * self.change_count + 2
+
+    def encode(self, profile: HeadingRateProfile) -> FloatArray:
+        """Encode a profile while validating its topology and interpolation."""
+        if not isinstance(profile, HeadingRateProfile):
+            raise TypeError("profile must be a HeadingRateProfile")
+        if len(profile.changes) != self.change_count:
+            raise ValueError("profile change count does not match parameterization")
+        if profile.interpolation != self.interpolation:
+            raise ValueError("profile interpolation does not match parameterization")
+        positions = np.asarray([change.at for change in profile.changes], dtype=float)
+        position_logits = ordered_positions_to_logits(
+            positions, min_spacing=self.min_change_spacing
+        )
+        if self.change_count:
+            position_logits = position_logits[:-1] - position_logits[-1]
+        limit = self.max_heading_rate_deg_per_u
+        rates = np.asarray(
+            [
+                profile.start_rate_deg_per_u,
+                *(change.heading_rate_deg_per_u for change in profile.changes),
+                profile.end_rate_deg_per_u,
+            ],
+            dtype=float,
+        )
+        if np.any(np.abs(rates) > limit):
+            raise ValueError("profile heading rates exceed max_heading_rate_deg_per_u")
+        rate_logits = np.asarray(
+            [
+                encode_interval(
+                    float(np.clip(rate, -limit * (1.0 - 1e-12), limit * (1.0 - 1e-12))),
+                    low=-limit,
+                    high=limit,
+                )
+                for rate in rates
+            ],
+            dtype=float,
+        )
+        return np.concatenate((position_logits, rate_logits))
+
+    def decode(self, values: ArrayLike) -> HeadingRateProfile:
+        """Decode finite parameter values into an ordered heading-rate profile."""
+        encoded = np.asarray(values, dtype=float)
+        if encoded.shape != (self.size,) or not np.isfinite(encoded).all():
+            raise ValueError(f"values must be a finite 1-D array with length {self.size}")
+        count = self.change_count
+        positions = ordered_positions_from_logits(
+            np.concatenate((encoded[:count], [0.0])),
+            min_spacing=self.min_change_spacing,
+        )
+        limit = self.max_heading_rate_deg_per_u
+        rates = np.asarray(
+            [decode_interval(float(value), low=-limit, high=limit) for value in encoded[count:]],
+            dtype=float,
+        )
+        changes = tuple(
+            HeadingRateChange(float(at), float(rate))
+            for at, rate in zip(positions, rates[1:-1], strict=True)
+        )
+        return HeadingRateProfile(
+            start_rate_deg_per_u=float(rates[0]),
+            changes=changes,
+            end_rate_deg_per_u=float(rates[-1]),
+            interpolation=self.interpolation,
+        )

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from planarcurve.fitting.parameters import (
+    HeadingRateParameterization,
     decode_interval,
     decode_positive,
     encode_interval,
@@ -11,6 +12,7 @@ from planarcurve.fitting.parameters import (
     ordered_positions_from_logits,
     ordered_positions_to_logits,
 )
+from planarcurve.trajectory import HeadingRateChange, HeadingRateProfile
 
 
 def test_ordered_positions_round_trip_and_configurable_spacing():
@@ -54,3 +56,31 @@ def test_parameterization_rejects_invalid_domain_inputs():
         ordered_positions_to_logits(np.array([0.6, 0.5]))
     with pytest.raises(ValueError, match="positive"):
         encode_positive(0.0)
+
+
+
+def test_heading_rate_parameterization_rejects_mismatched_profiles_and_values():
+    codec = HeadingRateParameterization(
+        change_count=1,
+        min_change_spacing=0.1,
+        max_heading_rate_deg_per_u=10.0,
+    )
+    profile = HeadingRateProfile(
+        start_rate_deg_per_u=1.0,
+        changes=(HeadingRateChange(0.5, 2.0),),
+        end_rate_deg_per_u=3.0,
+    )
+    assert codec.decode(codec.encode(profile)) == profile
+
+    with pytest.raises(ValueError, match="change count"):
+        codec.encode(HeadingRateProfile(1.0, 2.0))
+    with pytest.raises(ValueError, match="interpolation"):
+        codec.encode(HeadingRateProfile(1.0, 2.0, changes=profile.changes, interpolation="linear"))
+    with pytest.raises(ValueError, match="max_heading_rate"):
+        codec.encode(HeadingRateProfile(20.0, 2.0, changes=profile.changes))
+    with pytest.raises(ValueError, match="length"):
+        codec.decode(np.zeros(codec.size + 1))
+    with pytest.raises(ValueError, match="finite"):
+        codec.decode(np.full(codec.size, np.nan))
+    with pytest.raises(ValueError, match="spacing"):
+        HeadingRateParameterization(3, 0.5, 10.0)

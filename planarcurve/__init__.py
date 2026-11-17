@@ -1,5 +1,11 @@
 """Planar curve and trajectory mathematics."""
 
+from .descriptors import (
+    TrajectoryDescriptor,
+    descriptor_distance,
+    reverse_descriptor,
+    trajectory_descriptor,
+)
 from .trajectory import (
     HeadingRateChange,
     HeadingRateProfile,
@@ -74,4 +80,8 @@ __all__ = [
     "evaluate_trajectory_chain",
     "reverse_trajectory",
     "trajectory_chain_to_cubic_path",
+    "TrajectoryDescriptor",
+    "descriptor_distance",
+    "reverse_descriptor",
+    "trajectory_descriptor",
 ]

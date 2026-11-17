@@ -26,12 +26,10 @@ from ..trajectory import (
 from ..transforms import Similarity2D
 from ..types import FloatArray, _require_integer
 from .parameters import (
-    decode_interval,
+    HeadingRateParameterization,
     decode_positive,
-    encode_interval,
     encode_positive,
     ordered_positions_from_logits,
-    ordered_positions_to_logits,
 )
 
 
@@ -131,46 +129,9 @@ class SharedTrajectoryFitResult:
     success: bool
     cost: float
     metrics: Mapping[str, float]
+    optimizer_evaluations: int = 0
 
 
-@dataclass(frozen=True)
-class _ProfileCodec:
-    options: TrajectoryFitOptions
-
-    @property
-    def size(self) -> int:
-        count = self.options.change_count
-        return count + count + 2
-
-    def decode(self, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        count = self.options.change_count
-        position_logits = np.concatenate((values[:count], [0.0]))
-        positions = ordered_positions_from_logits(
-            position_logits, min_spacing=self.options.min_change_spacing
-        )
-        rate_logits = values[count:]
-        limit = self.options.max_heading_rate_deg_per_u
-        rates = np.asarray(
-            [decode_interval(value, low=-limit, high=limit) for value in rate_logits]
-        )
-        return positions, rates
-
-    def encode(self, positions: np.ndarray, rates: np.ndarray) -> np.ndarray:
-        position_logits = ordered_positions_to_logits(
-            positions, min_spacing=self.options.min_change_spacing
-        )
-        if self.options.change_count:
-            position_logits = position_logits[:-1] - position_logits[-1]
-        limit = self.options.max_heading_rate_deg_per_u
-        rate_logits = [
-            encode_interval(
-                float(np.clip(rate, -limit * (1.0 - 1e-12), limit * (1.0 - 1e-12))),
-                low=-limit,
-                high=limit,
-            )
-            for rate in rates
-        ]
-        return np.asarray([*position_logits, *rate_logits], dtype=float)
 
 
 def resample_by_arclength(points: ArrayLike, *, samples: int = 64) -> FloatArray:
@@ -400,9 +361,13 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
         than assuming that a result object implies convergence.
     """
     target_points, target_heading, target_length = _target_state(points, options)
-    codec = _ProfileCodec(options)
+    codec = HeadingRateParameterization(
+        change_count=options.change_count,
+        min_change_spacing=options.min_change_spacing,
+        max_heading_rate_deg_per_u=options.max_heading_rate_deg_per_u,
+    )
     positions, rates = _initial_profile(target_points, target_heading, options)
-    profile_vector = codec.encode(positions, rates)
+    profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
     initial_trajectory = _trajectory_from(positions, rates)
     initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
     unit_end_length = float(np.linalg.norm(initial_xy[-1]))
@@ -425,8 +390,11 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
     )
 
     def decode(values: np.ndarray) -> tuple[Trajectory2D, Similarity2D]:
-        event_positions, event_rates = codec.decode(values[: codec.size])
-        trajectory = _trajectory_from(event_positions, event_rates)
+        trajectory = Trajectory2D(
+            length=1.0,
+            start_heading_deg=0.0,
+            heading_rate=codec.decode(values[: codec.size]),
+        )
         base = codec.size
         transform = Similarity2D(
             scale=decode_positive(float(values[base])),
@@ -493,11 +461,15 @@ def fit_shared_trajectory_profile(
     if not occurrences:
         raise ValueError("at least one occurrence is required")
     states = [_target_state(points, options) for points in occurrences]
-    codec = _ProfileCodec(options)
+    codec = HeadingRateParameterization(
+        change_count=options.change_count,
+        min_change_spacing=options.min_change_spacing,
+        max_heading_rate_deg_per_u=options.max_heading_rate_deg_per_u,
+    )
     initial_profiles = [_initial_profile(points, heading, options) for points, heading, _ in states]
     positions = np.mean([item[0] for item in initial_profiles], axis=0)
     rates = np.mean([item[1] for item in initial_profiles], axis=0)
-    profile_vector = codec.encode(positions, rates)
+    profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
     initial_trajectory = _trajectory_from(positions, rates)
     initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
     unit_end_length = float(np.linalg.norm(initial_xy[-1]))
@@ -526,8 +498,11 @@ def fit_shared_trajectory_profile(
     initial = np.concatenate((profile_vector, initial_transforms))
 
     def decode(values: np.ndarray) -> tuple[Trajectory2D, tuple[Similarity2D, ...]]:
-        event_positions, event_rates = codec.decode(values[: codec.size])
-        trajectory = _trajectory_from(event_positions, event_rates)
+        trajectory = Trajectory2D(
+            length=1.0,
+            start_heading_deg=0.0,
+            heading_rate=codec.decode(values[: codec.size]),
+        )
         decoded_transforms = []
         for index in range(len(states)):
             base = codec.size + index * 4
@@ -584,4 +559,5 @@ def fit_shared_trajectory_profile(
             "p95_position_error": float(np.percentile(all_position_errors, 95)),
             "max_total_turn_error_deg": float(max(all_turn_errors)),
         },
+        optimizer_evaluations=int(best.nfev),
     )

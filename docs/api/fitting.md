@@ -4,7 +4,7 @@ Optional fitting utilities require SciPy. Install with `python -m pip install 'p
 
 ## Stable public fitting API
 
-The package exports `SplineEndpointPolicy`, `SharedTrajectoryFitResult`, `TrajectoryFitOptions`, `TrajectoryFitResult`, `fit_shared_trajectory_profile`, and `fit_trajectory` from `planarcurve.fitting`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
+The package exports spline and trajectory fitting APIs, including `HeadingRateParameterization`, `TrajectoryFamilyModel`, `TrajectoryOccurrenceFit`, `TrajectoryVariationPolicy`, `TrajectoryModelSelectionOptions`, `fit_trajectory_family`, and `select_shared_trajectory_model`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
 
 ```{automodule} planarcurve.fitting
 :members:
@@ -43,6 +43,25 @@ The package exports `SplineEndpointPolicy`, `SharedTrajectoryFitResult`, `Trajec
 ## Trajectory fitting
 
 ```{automodule} planarcurve.fitting.trajectory
+:members:
+:undoc-members:
+:show-inheritance:
+:member-order: bysource
+```
+
+
+## Shared trajectory family fitting
+
+```{automodule} planarcurve.fitting.family
+:members:
+:undoc-members:
+:show-inheritance:
+:member-order: bysource
+```
+
+## Trajectory model selection
+
+```{automodule} planarcurve.fitting.model_selection
 :members:
 :undoc-members:
 :show-inheritance:

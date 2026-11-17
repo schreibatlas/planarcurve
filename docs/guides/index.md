@@ -8,6 +8,7 @@ Task-oriented workflows for each part of the package.
 polylines
 bezier
 trajectories
+shared-trajectory-families
 transforms
 splines
 fitting
