@@ -99,7 +99,6 @@ def test_descriptor_distance_weights_and_input_validation():
         TrajectoryDescriptor(1, np.zeros((1, 2)), np.zeros((1, 2)), np.zeros(1), 0.0, 0.0, 0.0)
 
 
-
 def test_descriptor_apis_are_exported_from_package_root():
     import planarcurve
 

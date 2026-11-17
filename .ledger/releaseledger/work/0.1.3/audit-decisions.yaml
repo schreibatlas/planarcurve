@@ -1,0 +1,35 @@
+rows:
+- sha: 66641bc814c0648cc9c84a32aa286b4032256935
+  inspected: true
+  inspected_paths:
+  - docs/api/fitting.md
+  - docs/examples.md
+  - docs/guides/index.md
+  - docs/guides/shared-trajectory-families.md
+  - examples/README.md
+  - examples/fit_shared_trajectory_family.py
+  - examples/select_trajectory_complexity.py
+  - planarcurve/__init__.py
+  - planarcurve/descriptors.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/family.py
+  - planarcurve/fitting/model_selection.py
+  - planarcurve/fitting/parameters.py
+  - planarcurve/fitting/trajectory.py
+  - tests/test_fitting_parameters.py
+  - tests/test_fitting_trajectory.py
+  - tests/test_trajectory_descriptor.py
+  - tests/test_trajectory_family.py
+  - tests/test_trajectory_family_variation.py
+  - tests/test_trajectory_model_selection.py
+  observed_behavior: >-
+    Added directed normalized trajectory descriptors and comparison APIs,
+    shared family fitting with bounded per-occurrence rate variation and
+    diagnostics, deterministic model-order selection, and a public versioned
+    heading-rate parameterization codec.
+  public_impact: public
+  decision: accepted
+  target_entry_key: null
+  target_entry_id: null
+  notes: ''
+  stale: false

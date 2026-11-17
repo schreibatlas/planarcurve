@@ -108,7 +108,6 @@ def test_family_variation_policy_does_not_allow_position_offsets_yet():
         )
 
 
-
 def test_very_short_but_nonzero_observations_are_fit():
     occurrences = [
         np.array([[0.0, 0.0], [2.0, 0.0]]),

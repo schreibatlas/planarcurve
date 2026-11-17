@@ -1,0 +1,73 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.1.3
+git_base_ref: v0.1.2
+git_base_sha: befc1cdd5dd7bd21611c09b96cc34b6e5f8c1f22
+git_head_ref: HEAD
+git_head_sha: 66641bc814c0648cc9c84a32aa286b4032256935
+git_range: befc1cdd5dd7bd21611c09b96cc34b6e5f8c1f22..66641bc814c0648cc9c84a32aa286b4032256935
+commit_count: 1
+rows:
+- sha: 66641bc814c0648cc9c84a32aa286b4032256935
+  source_ref: git:66641bc814c0648cc9c84a32aa286b4032256935
+  short_sha: 66641bc
+  changed_paths:
+  - docs/api/fitting.md
+  - docs/examples.md
+  - docs/guides/index.md
+  - docs/guides/shared-trajectory-families.md
+  - examples/README.md
+  - examples/fit_shared_trajectory_family.py
+  - examples/select_trajectory_complexity.py
+  - planarcurve/__init__.py
+  - planarcurve/descriptors.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/family.py
+  - planarcurve/fitting/model_selection.py
+  - planarcurve/fitting/parameters.py
+  - planarcurve/fitting/trajectory.py
+  - tests/test_fitting_parameters.py
+  - tests/test_fitting_trajectory.py
+  - tests/test_trajectory_descriptor.py
+  - tests/test_trajectory_family.py
+  - tests/test_trajectory_family_variation.py
+  - tests/test_trajectory_model_selection.py
+  stats:
+    files_changed: 20
+    insertions: 1829
+    deletions: 62
+  inspected: true
+  inspected_paths:
+  - docs/api/fitting.md
+  - docs/examples.md
+  - docs/guides/index.md
+  - docs/guides/shared-trajectory-families.md
+  - examples/README.md
+  - examples/fit_shared_trajectory_family.py
+  - examples/select_trajectory_complexity.py
+  - planarcurve/__init__.py
+  - planarcurve/descriptors.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/family.py
+  - planarcurve/fitting/model_selection.py
+  - planarcurve/fitting/parameters.py
+  - planarcurve/fitting/trajectory.py
+  - tests/test_fitting_parameters.py
+  - tests/test_fitting_trajectory.py
+  - tests/test_trajectory_descriptor.py
+  - tests/test_trajectory_family.py
+  - tests/test_trajectory_family_variation.py
+  - tests/test_trajectory_model_selection.py
+  observed_behavior: Added directed normalized trajectory descriptors and comparison
+    APIs, shared family fitting with bounded per-occurrence rate variation and diagnostics,
+    deterministic model-order selection, and a public versioned heading-rate parameterization
+    codec.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: shared trajectory family fitting'
+  target_entry_id: entry-0001
+  notes: ''

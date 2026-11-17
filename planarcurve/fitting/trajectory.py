@@ -132,8 +132,6 @@ class SharedTrajectoryFitResult:
     optimizer_evaluations: int = 0
 
 
-
-
 def resample_by_arclength(points: ArrayLike, *, samples: int = 64) -> FloatArray:
     """Resample ordered 2D points uniformly by chord length."""
     values = np.asarray(points, dtype=float)

@@ -201,6 +201,7 @@ def test_public_profile_parameterization_uses_identifiable_position_logits():
                 atol=1e-9,
             )
 
+
 def test_fitted_profile_is_invariant_to_coordinate_scale_and_rotation():
     base_points = evaluate_trajectory(true_trajectory(), count=257).xy
     options = TrajectoryFitOptions(change_count=3, samples=48, restarts=0, max_nfev=150)
@@ -244,7 +245,6 @@ def test_fitting_package_exports_stable_trajectory_api():
 
     for name in public_names:
         assert getattr(public, name) is getattr(implementation, name)
-
 
 
 def test_heading_rate_parameterization_is_exported_from_fitting_package():

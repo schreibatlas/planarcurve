@@ -217,9 +217,7 @@ def descriptor_distance(
         raise ValueError("at least one descriptor weight must be positive")
     differences = {
         "normalized_xy": float(
-            np.sqrt(
-                np.mean(np.sum((first.normalized_xy - second.normalized_xy) ** 2, axis=1))
-            )
+            np.sqrt(np.mean(np.sum((first.normalized_xy - second.normalized_xy) ** 2, axis=1)))
         ),
         "tangent_xy": float(
             np.sqrt(np.mean(np.sum((first.tangent_xy - second.tangent_xy) ** 2, axis=1)))
@@ -236,8 +234,7 @@ def descriptor_distance(
     return float(
         np.sqrt(
             sum(
-                normalized_weights[name] * difference**2
-                for name, difference in differences.items()
+                normalized_weights[name] * difference**2 for name, difference in differences.items()
             )
             / total_weight
         )

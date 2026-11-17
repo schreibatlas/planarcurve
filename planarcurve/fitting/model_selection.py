@@ -45,8 +45,7 @@ class TrajectoryModelSelectionOptions:
 
     def __post_init__(self) -> None:
         counts = tuple(
-            _require_integer(value, name="change_counts", minimum=0)
-            for value in self.change_counts
+            _require_integer(value, name="change_counts", minimum=0) for value in self.change_counts
         )
         if not counts or len(set(counts)) != len(counts):
             raise ValueError(

@@ -21,8 +21,7 @@ def main() -> None:
         Similarity2D(0.9, 140.0, -1.0, -2.0),
     )
     occurrences = [
-        transform.apply(base) + rng.normal(0.0, 0.0005, base.shape)
-        for transform in transforms
+        transform.apply(base) + rng.normal(0.0, 0.0005, base.shape) for transform in transforms
     ]
 
     signatures = [trajectory_descriptor(points) for points in occurrences]

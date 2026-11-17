@@ -58,7 +58,6 @@ def test_parameterization_rejects_invalid_domain_inputs():
         encode_positive(0.0)
 
 
-
 def test_heading_rate_parameterization_rejects_mismatched_profiles_and_values():
     codec = HeadingRateParameterization(
         change_count=1,

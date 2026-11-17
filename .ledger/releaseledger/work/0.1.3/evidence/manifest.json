@@ -1,0 +1,44 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 1829,
+      "deletions": 62,
+      "patch_file": "66641bc.patch",
+      "patch_sha256": "15894d552c0b91d55d33d45f41417a0ffd1e662bb9aa7a46616f6d98b41ec66e",
+      "paths": [
+        "docs/api/fitting.md",
+        "docs/examples.md",
+        "docs/guides/index.md",
+        "docs/guides/shared-trajectory-families.md",
+        "examples/README.md",
+        "examples/fit_shared_trajectory_family.py",
+        "examples/select_trajectory_complexity.py",
+        "planarcurve/__init__.py",
+        "planarcurve/descriptors.py",
+        "planarcurve/fitting/__init__.py",
+        "planarcurve/fitting/family.py",
+        "planarcurve/fitting/model_selection.py",
+        "planarcurve/fitting/parameters.py",
+        "planarcurve/fitting/trajectory.py",
+        "tests/test_fitting_parameters.py",
+        "tests/test_fitting_trajectory.py",
+        "tests/test_trajectory_descriptor.py",
+        "tests/test_trajectory_family.py",
+        "tests/test_trajectory_family_variation.py",
+        "tests/test_trajectory_model_selection.py"
+      ],
+      "sha": "66641bc814c0648cc9c84a32aa286b4032256935",
+      "short_sha": "66641bc",
+      "source_ref": "git:66641bc814c0648cc9c84a32aa286b4032256935"
+    }
+  ],
+  "git_base_ref": "befc1cdd5dd7bd21611c09b96cc34b6e5f8c1f22",
+  "git_base_sha": "befc1cdd5dd7bd21611c09b96cc34b6e5f8c1f22",
+  "git_head_ref": "66641bc814c0648cc9c84a32aa286b4032256935",
+  "git_head_sha": "66641bc814c0648cc9c84a32aa286b4032256935",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.1.3",
+  "schema_version": 1
+}

@@ -89,6 +89,7 @@ class TrajectoryFamilyModel:
             self, "fit_metrics", _finite_metrics(self.fit_metrics, name="fit_metrics")
         )
 
+
 @dataclass(frozen=True)
 class TrajectoryOccurrenceFit:
     """Fit diagnostics for one ordered observation in a trajectory family.
@@ -121,9 +122,11 @@ class TrajectoryOccurrenceFit:
             raise ValueError("occurrence metrics and rate deviations must be finite")
         if any(value < 0.0 for value in metrics[:5]):
             raise ValueError("occurrence error metrics and robust cost must be nonnegative")
-        object.__setattr__(self, "optimizer_evaluations", _require_integer(
-            self.optimizer_evaluations, name="optimizer_evaluations", minimum=0
-        ))
+        object.__setattr__(
+            self,
+            "optimizer_evaluations",
+            _require_integer(self.optimizer_evaluations, name="optimizer_evaluations", minimum=0),
+        )
         object.__setattr__(
             self,
             "rate_deviation",
@@ -159,9 +162,7 @@ class TrajectoryFamilyFitResult:
         object.__setattr__(self, "occurrences", occurrences)
 
 
-def _trajectory_with_rate_offsets(
-    trajectory: Trajectory2D, offsets: np.ndarray
-) -> Trajectory2D:
+def _trajectory_with_rate_offsets(trajectory: Trajectory2D, offsets: np.ndarray) -> Trajectory2D:
     profile = trajectory.heading_rate
     changes = tuple(
         HeadingRateChange(change.at, change.heading_rate_deg_per_u + float(offset))
@@ -324,9 +325,7 @@ def fit_trajectory_family(
         raise ValueError("at least one occurrence is required")
     if not isinstance(fit_options, TrajectoryFitOptions):
         raise TypeError("fit_options must be TrajectoryFitOptions")
-    if variation_policy is not None and not isinstance(
-        variation_policy, TrajectoryVariationPolicy
-    ):
+    if variation_policy is not None and not isinstance(variation_policy, TrajectoryVariationPolicy):
         raise TypeError("variation_policy must be a TrajectoryVariationPolicy or None")
     if variation_policy is not None and variation_policy.allow_change_position_offsets:
         raise NotImplementedError("per-occurrence change-position offsets are not supported")

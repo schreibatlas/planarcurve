@@ -1,0 +1,2201 @@
+ docs/api/fitting.md                       |  21 +-
+ docs/examples.md                          |   6 +-
+ docs/guides/index.md                      |   1 +
+ docs/guides/shared-trajectory-families.md | 127 +++++++++
+ examples/README.md                        |   4 +
+ examples/fit_shared_trajectory_family.py  |  57 ++++
+ examples/select_trajectory_complexity.py  |  83 ++++++
+ planarcurve/__init__.py                   |  10 +
+ planarcurve/descriptors.py                | 244 +++++++++++++++++
+ planarcurve/fitting/__init__.py           |  20 ++
+ planarcurve/fitting/family.py             | 436 ++++++++++++++++++++++++++++++
+ planarcurve/fitting/model_selection.py    | 191 +++++++++++++
+ planarcurve/fitting/parameters.py         | 108 +++++++-
+ planarcurve/fitting/trajectory.py         |  74 ++---
+ tests/test_fitting_parameters.py          |  30 ++
+ tests/test_fitting_trajectory.py          |  55 +++-
+ tests/test_trajectory_descriptor.py       | 109 ++++++++
+ tests/test_trajectory_family.py           | 123 +++++++++
+ tests/test_trajectory_family_variation.py |  66 +++++
+ tests/test_trajectory_model_selection.py  | 126 +++++++++
+ 20 files changed, 1829 insertions(+), 62 deletions(-)
+
+diff --git a/docs/api/fitting.md b/docs/api/fitting.md
+index 4c769eb..25a09c1 100644
+--- a/docs/api/fitting.md
++++ b/docs/api/fitting.md
+@@ -4,7 +4,7 @@ Optional fitting utilities require SciPy. Install with `python -m pip install 'p
+
+ ## Stable public fitting API
+
+-The package exports `SplineEndpointPolicy`, `SharedTrajectoryFitResult`, `TrajectoryFitOptions`, `TrajectoryFitResult`, `fit_shared_trajectory_profile`, and `fit_trajectory` from `planarcurve.fitting`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
++The package exports spline and trajectory fitting APIs, including `HeadingRateParameterization`, `TrajectoryFamilyModel`, `TrajectoryOccurrenceFit`, `TrajectoryVariationPolicy`, `TrajectoryModelSelectionOptions`, `fit_trajectory_family`, and `select_shared_trajectory_model`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
+
+ ```{automodule} planarcurve.fitting
+ :members:
+@@ -48,3 +48,22 @@ The package exports `SplineEndpointPolicy`, `SharedTrajectoryFitResult`, `Trajec
+ :show-inheritance:
+ :member-order: bysource
+ ```
++
++
++## Shared trajectory family fitting
++
++```{automodule} planarcurve.fitting.family
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
++
++## Trajectory model selection
++
++```{automodule} planarcurve.fitting.model_selection
++:members:
++:undoc-members:
++:show-inheritance:
++:member-order: bysource
++```
+diff --git a/docs/examples.md b/docs/examples.md
+index 062eeb6..237b627 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -1,6 +1,6 @@
+ # Examples
+
+-The repository includes six synthetic, standalone demonstrations. They do not require Matplotlib, application-specific models, or local datasets. Install optional integrations once with `python -m pip install '.[all]'`, then run scripts from the repository root.
++The repository includes eight synthetic, standalone demonstrations. They do not require Matplotlib, application-specific models, or local datasets. Install optional integrations once with `python -m pip install '.[all]'`, then run scripts from the repository root.
+
+ | Script | Demonstrates | Extra | Output |
+ | --- | --- | --- | --- |
+@@ -10,6 +10,8 @@ The repository includes six synthetic, standalone demonstrations. They do not re
+ | [`svg_pipeline.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py) | SVG analysis, transform, sampling, and resampling | `svg` | Console |
+ | [`fit_polyline_to_spline.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) | Robust fitting of shared spline control points | `fit` | `fit_polyline_to_spline.svg` |
+ | [`fit_shared_trajectory.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) | One normalized profile fitted to transformed occurrences | `fit` | `fit_shared_trajectory.svg` |
++| [`fit_shared_trajectory_family.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and shared family diagnostics | `fit` | Console |
++| [`select_trajectory_complexity.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py) | Deterministic model-order selection and decomposed scores | `fit` | Console |
+
+ Run one example or all of them:
+
+@@ -20,6 +22,8 @@ python examples/spline_to_bezier.py
+ python examples/svg_pipeline.py
+ python examples/fit_polyline_to_spline.py
+ python examples/fit_shared_trajectory.py
++python examples/fit_shared_trajectory_family.py
++python examples/select_trajectory_complexity.py
+ ```
+
+ The scripts contain assertions for the behaviors they demonstrate. The SVG-producing examples write files to the current working directory. They are also used as sources for the task-oriented [guides](guides/index.md).
+diff --git a/docs/guides/index.md b/docs/guides/index.md
+index c845942..350f41a 100644
+--- a/docs/guides/index.md
++++ b/docs/guides/index.md
+@@ -8,6 +8,7 @@ Task-oriented workflows for each part of the package.
+ polylines
+ bezier
+ trajectories
++shared-trajectory-families
+ transforms
+ splines
+ fitting
+diff --git a/docs/guides/shared-trajectory-families.md b/docs/guides/shared-trajectory-families.md
+new file mode 100644
+index 0000000..498326e
+--- /dev/null
++++ b/docs/guides/shared-trajectory-families.md
+@@ -0,0 +1,127 @@
++# Shared trajectory families
++
++PlanarCurve can describe and fit reusable directed geometric trajectory families. It learns and compares geometric trajectory families. It does not attach semantic meaning to them.
++
++The data flow is:
++
++```text
++ordered points
++    ↓
++directed normalized descriptor
++    ↓
++Trajectory2D candidate
++    ↓
++TrajectoryFamilyModel
++```
++
++## Directed descriptors
++
++`planarcurve.trajectory_descriptor(points, *, samples=64, smoothing_window=5)` resamples an ordered polyline by chord length, translates its first sample to the origin, divides by arc length, and rotates its starting tangent to +x. It never reverses the points. `normalized_xy`, `tangent_xy`, and `heading_rate` are read-only arrays with `samples` rows. Heading rate is measured in degrees per normalized arc-length unit.
++
++The scalar descriptor fields include signed total turn, endpoint displacement divided by arc length, and signed turn energy. Turn energy is the sum of each sampled heading increment times its absolute value, in square degrees. Use `reverse_descriptor` to request the opposite traversal explicitly. `descriptor_distance` compares equal-sized descriptors with a dimensionless weighted RMS; its optional weight mapping accepts descriptor field names and defaults to equal weights.
++
++```python
++from planarcurve import descriptor_distance, trajectory_descriptor
++
++first = trajectory_descriptor(points_a)
++second = trajectory_descriptor(points_b)
++print(descriptor_distance(first, second))
++```
++
++Descriptors provide a fast geometric comparison. Their distances are not probabilities or handwriting classifications.
++
++## Public profile parameterization
++
++`planarcurve.fitting.HeadingRateParameterization` is the public numeric codec for profile parameters. Version 1 encodes ordered change-position logits followed by bounded heading-rate logits. Its `version` class attribute is `1`. The interpolation kind is configured on the codec, rather than encoded as a number, and must match the profile passed to `encode`.
++
++```python
++from planarcurve.fitting import HeadingRateParameterization
++
++codec = HeadingRateParameterization(
++    change_count=len(profile.changes),
++    min_change_spacing=0.02,
++    max_heading_rate_deg_per_u=36000.0,
++    interpolation=profile.interpolation,
++)
++values = codec.encode(profile)
++restored = codec.decode(values)
++```
++
++The codec validates ordered interior positions, configured spacing, finite values, and symmetric rate bounds. Downstream packages should use this API instead of duplicating parameter transforms.
++
++## Fit one shared family
++
++`fit_trajectory_family` fits one normalized shared profile and one positive-scale similarity transform for each observation. Input order is authoritative. Family fitting does not silently search reversed orientations.
++
++```python
++from planarcurve.fitting import TrajectoryFitOptions, fit_trajectory_family
++
++result = fit_trajectory_family(
++    occurrences,
++    fit_options=TrajectoryFitOptions(change_count=2),
++)
++model = result.model
++print(model.change_count, result.score)
++for occurrence in result.occurrences:
++    print(occurrence.transform, occurrence.position_rmse, occurrence.heading_rmse_deg)
++```
++
++`TrajectoryFamilyModel.parameter_scale` reports population standard deviations of the fitted rate offsets, in degrees per normalized progress unit. These are dispersion statistics, not confidence probabilities. Per-occurrence position RMSE and endpoint error are normalized by that observation's arc length. Heading and turn errors are in degrees. The robust cost uses the configured fit residual weights and robust scale. `accepted` flags fits whose robust cost exceeds the threshold `median + max(3 × 1.4826 × MAD, 5% of max(median, 1e-8))`, where MAD is the median absolute deviation. Optimizer convergence and evaluation count are explicit fields.
++
++### Bounded occurrence variation
++
++Pass `TrajectoryVariationPolicy` to enable small per-occurrence rate offsets. Each knot offset is bounded by `rate_sigma` and regularized at that scale. The profile knot positions and model order remain shared, and each occurrence returns its rate-deviation tuple. Arbitrary occurrence-specific splines are not fitted. Change-position offsets are not implemented and are rejected if requested.
++
++```python
++from planarcurve.fitting import TrajectoryVariationPolicy
++
++result = fit_trajectory_family(
++    occurrences,
++    fit_options=fit_options,
++    variation_policy=TrajectoryVariationPolicy(rate_sigma=25.0),
++)
++```
++
++## Select model order
++
++`select_shared_trajectory_model` fits every requested `change_count` and returns the selected model with decomposed costs. The default candidates are `(0, 1, 2, 3, 4)`. Its score is training robust cost, plus complexity cost, plus optional held-out validation cost.
++
++The MVP complexity term is:
++
++```text
++complexity_weight × parameter_count × log1p(1 / parameter_precision)
++parameter_count = (2 × change_count + 2) + (4 × training occurrences)
++```
++
++`parameter_precision` is a dimensionless resolution factor in `(0, 1]`; the default is `1e-3`. This is an explicit configurable regularizer, not a universal MDL interpretation. Validation splits whole occurrences deterministically from `seed`. Fewer than three observations or a zero validation fraction produces no held-out cost.
++
++```python
++from planarcurve.fitting import (
++    TrajectoryModelSelectionOptions,
++    select_shared_trajectory_model,
++)
++
++selected = select_shared_trajectory_model(
++    occurrences,
++    fit_options=fit_options,
++    selection_options=TrajectoryModelSelectionOptions(seed=7),
++)
++print(
++    selected.model.change_count,
++    selected.training_cost,
++    selected.complexity_cost,
++    selected.validation_cost,
++    selected.score,
++)
++```
++
++## Synthetic examples
++
++Run the standalone examples from the repository root:
++
++```bash
++python examples/fit_shared_trajectory_family.py
++python examples/select_trajectory_complexity.py
++```
++
++They generate all points in code and require no application-specific assets. PlanarCurve provides geometry and fitting mathematics only. It does not provide gesture, glyph, OCR, handwriting, or other semantic labels.
+diff --git a/examples/README.md b/examples/README.md
+index e96d215..7ad5e36 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -9,6 +9,8 @@ python examples/spline_to_bezier.py
+ python examples/svg_pipeline.py
+ python examples/fit_polyline_to_spline.py
+ python examples/fit_shared_trajectory.py
++python examples/fit_shared_trajectory_family.py
++python examples/select_trajectory_complexity.py
+ ```
+
+ | Example | Demonstrates | Optional dependency | Output |
+@@ -19,5 +21,7 @@ python examples/fit_shared_trajectory.py
+ | [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py) | Parsing, transforming, and resampling one SVG subpath | FontTools | Console |
+ | [Spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) | Robust shared control-point fitting | SciPy | `fit_polyline_to_spline.svg` |
+ | [Shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) | One normalized shape fitted to multiple occurrences | SciPy | `fit_shared_trajectory.svg` |
++| [Shared trajectory family fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and per-occurrence family diagnostics | SciPy | Console |
++| [Trajectory complexity selection](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py) | Deterministic model-order selection and decomposed costs | SciPy | Console |
+
+ Assertions in the scripts check the numerical behavior each example demonstrates. SVG outputs are written to the current working directory.
+diff --git a/examples/fit_shared_trajectory_family.py b/examples/fit_shared_trajectory_family.py
+new file mode 100644
+index 0000000..180765f
+--- /dev/null
++++ b/examples/fit_shared_trajectory_family.py
+@@ -0,0 +1,57 @@
++"""Fit a directed shared family from transformed synthetic arc observations."""
++
++from __future__ import annotations
++
++import numpy as np
++
++from planarcurve import descriptor_distance, trajectory_descriptor
++from planarcurve.fitting import TrajectoryFitOptions, fit_trajectory_family
++from planarcurve.trajectory import HeadingRateProfile, Trajectory2D, evaluate_trajectory
++from planarcurve.transforms import Similarity2D
++
++
++def main() -> None:
++    arc = Trajectory2D(1.0, 0.0, HeadingRateProfile(90.0, 90.0))
++    base = evaluate_trajectory(arc, count=129).xy
++    rng = np.random.default_rng(7)
++    transforms = (
++        Similarity2D(0.6, -35.0, 2.0, -1.0),
++        Similarity2D(1.5, 20.0, -3.0, 2.5),
++        Similarity2D(2.0, 75.0, 1.0, 4.0),
++        Similarity2D(0.9, 140.0, -1.0, -2.0),
++    )
++    occurrences = [
++        transform.apply(base) + rng.normal(0.0, 0.0005, base.shape)
++        for transform in transforms
++    ]
++
++    signatures = [trajectory_descriptor(points) for points in occurrences]
++    assert max(descriptor_distance(signatures[0], item) for item in signatures[1:]) < 0.03
++
++    result = fit_trajectory_family(
++        occurrences,
++        fit_options=TrajectoryFitOptions(
++            change_count=0,
++            samples=48,
++            restarts=1,
++            seed=7,
++            max_nfev=200,
++        ),
++    )
++    assert result.success
++    assert all(item.accepted for item in result.occurrences)
++    print(f"shared change count: {result.model.change_count}")
++    print(f"training cost: {result.training_cost:.6f}")
++    print(f"family score: {result.score:.6f}")
++    print(f"rate dispersion: {dict(result.model.parameter_scale)}")
++    for index, occurrence in enumerate(result.occurrences):
++        print(
++            f"occurrence {index}: scale={occurrence.transform.scale:.3f}, "
++            f"position_rmse={occurrence.position_rmse:.5f}, "
++            f"heading_rmse_deg={occurrence.heading_rmse_deg:.3f}, "
++            f"accepted={occurrence.accepted}"
++        )
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/select_trajectory_complexity.py b/examples/select_trajectory_complexity.py
+new file mode 100644
+index 0000000..2b318bd
+--- /dev/null
++++ b/examples/select_trajectory_complexity.py
+@@ -0,0 +1,83 @@
++"""Compare selected trajectory model orders on synthetic line and S-curve families."""
++
++from __future__ import annotations
++
++import numpy as np
++
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryModelSelectionOptions,
++    select_shared_trajectory_model,
++)
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_trajectory,
++)
++from planarcurve.transforms import Similarity2D
++
++
++def _observations(trajectory: Trajectory2D) -> list[np.ndarray]:
++    base = evaluate_trajectory(trajectory, count=97).xy
++    rng = np.random.default_rng(13)
++    return [
++        Similarity2D(
++            scale=0.7 + index * 0.25,
++            rotation_deg=-40.0 + index * 20.0,
++            dx=float(index),
++            dy=-0.5 * index,
++        ).apply(base)
++        + rng.normal(0.0, 0.001, base.shape)
++        for index in range(5)
++    ]
++
++
++def _select(trajectory: Trajectory2D):
++    return select_shared_trajectory_model(
++        _observations(trajectory),
++        fit_options=TrajectoryFitOptions(
++            change_count=0,
++            samples=32,
++            restarts=0,
++            max_nfev=150,
++        ),
++        selection_options=TrajectoryModelSelectionOptions(
++            change_counts=(0, 1, 2, 3, 4),
++            validation_fraction=0.2,
++            complexity_weight=0.01,
++            parameter_precision=1e-3,
++            seed=13,
++        ),
++    )
++
++
++def _report(name: str, result) -> None:
++    print(f"{name}: selected change count={result.model.change_count}")
++    print(f"  training cost:   {result.training_cost:.6f}")
++    print(f"  complexity cost: {result.complexity_cost:.6f}")
++    print(f"  validation cost: {result.validation_cost:.6f}")
++    print(f"  total score:     {result.score:.6f}")
++
++
++def main() -> None:
++    line = Trajectory2D(1.0, 0.0, HeadingRateProfile(0.0, 0.0))
++    s_curve = Trajectory2D(
++        1.0,
++        0.0,
++        HeadingRateProfile(
++            180.0,
++            180.0,
++            changes=(HeadingRateChange(0.5, -180.0),),
++        ),
++    )
++    line_result = _select(line)
++    s_curve_result = _select(s_curve)
++    assert line_result.success and line_result.model.change_count == 0
++    assert 0 < s_curve_result.model.change_count < 4
++    _report("straight family", line_result)
++    _report("S-shaped family", s_curve_result)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/planarcurve/__init__.py b/planarcurve/__init__.py
+index b6be240..6b19f68 100644
+--- a/planarcurve/__init__.py
++++ b/planarcurve/__init__.py
+@@ -1,5 +1,11 @@
+ """Planar curve and trajectory mathematics."""
+
++from .descriptors import (
++    TrajectoryDescriptor,
++    descriptor_distance,
++    reverse_descriptor,
++    trajectory_descriptor,
++)
+ from .trajectory import (
+     HeadingRateChange,
+     HeadingRateProfile,
+@@ -74,4 +80,8 @@ __all__ = [
+     "evaluate_trajectory_chain",
+     "reverse_trajectory",
+     "trajectory_chain_to_cubic_path",
++    "TrajectoryDescriptor",
++    "descriptor_distance",
++    "reverse_descriptor",
++    "trajectory_descriptor",
+ ]
+diff --git a/planarcurve/descriptors.py b/planarcurve/descriptors.py
+new file mode 100644
+index 0000000..442036a
+--- /dev/null
++++ b/planarcurve/descriptors.py
+@@ -0,0 +1,244 @@
++"""Direction-aware normalized descriptors for ordered planar trajectories."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from dataclasses import dataclass
++from math import isfinite
++
++import numpy as np
++from numpy.typing import ArrayLike
++
++from .polyline import resample_polyline_by_arclength
++from .types import FloatArray, _require_integer
++
++_DESCRIPTOR_FIELDS = (
++    "normalized_xy",
++    "tangent_xy",
++    "heading_rate",
++    "total_turn_deg",
++    "endpoint_displacement_ratio",
++    "signed_turn_energy",
++)
++_DEFAULT_WEIGHTS = {
++    "normalized_xy": 1.0,
++    "tangent_xy": 1.0,
++    "heading_rate": 1.0,
++    "total_turn_deg": 1.0,
++    "endpoint_displacement_ratio": 1.0,
++    "signed_turn_energy": 1.0,
++}
++
++
++def _readonly_array(values: ArrayLike, *, shape: tuple[int, ...], name: str) -> FloatArray:
++    array = np.asarray(values, dtype=float)
++    if array.shape != shape or not np.isfinite(array).all():
++        raise ValueError(f"{name} must be a finite array with shape {shape}")
++    result = np.array(array, dtype=float, copy=True)
++    result.setflags(write=False)
++    return result
++
++
++def _smooth_rows(values: FloatArray, window: int) -> FloatArray:
++    if window == 1:
++        return values
++    left = (window - 1) // 2
++    right = window - 1 - left
++    padded = np.pad(values, ((left, right), (0, 0)), mode="edge")
++    return np.stack(
++        [
++            np.convolve(padded[:, column], np.ones(window) / window, mode="valid")
++            for column in range(2)
++        ],
++        axis=1,
++    )
++
++
++def _canonical_rotation(angle_rad: float) -> FloatArray:
++    cosine, sine = np.cos(angle_rad), np.sin(angle_rad)
++    return np.array([[cosine, sine], [-sine, cosine]], dtype=float)
++
++
++def _canonical_tangents(points: FloatArray, smoothing_window: int) -> tuple[FloatArray, FloatArray]:
++    smoothed = _smooth_rows(points, smoothing_window)
++    derivatives = np.gradient(smoothed, axis=0)
++    norms = np.linalg.norm(derivatives, axis=1)
++    if np.any(norms <= 1e-12):
++        raise ValueError("trajectory tangent is undefined at one or more samples")
++    tangents = derivatives / norms[:, None]
++    start_angle = float(np.arctan2(tangents[0, 1], tangents[0, 0]))
++    rotation = _canonical_rotation(start_angle)
++    canonical_points = points @ rotation.T
++    canonical_tangents = tangents @ rotation.T
++    return canonical_points, canonical_tangents
++
++
++@dataclass(frozen=True)
++class TrajectoryDescriptor:
++    """A sampled, scale- and pose-normalized descriptor of an ordered curve.
++
++    ``normalized_xy`` has unit input arc length and starts at the origin.
++    ``tangent_xy`` contains unit tangents in that same canonical frame.
++    ``heading_rate`` is measured in degrees per normalized arc-length unit.
++    The signed turn energy is the sum of each sampled heading increment times
++    its absolute value, in square degrees.
++    """
++
++    sample_count: int
++    normalized_xy: FloatArray
++    tangent_xy: FloatArray
++    heading_rate: FloatArray
++    total_turn_deg: float
++    endpoint_displacement_ratio: float
++    signed_turn_energy: float
++
++    def __post_init__(self) -> None:
++        count = _require_integer(self.sample_count, name="sample_count", minimum=2)
++        object.__setattr__(self, "sample_count", count)
++        object.__setattr__(
++            self,
++            "normalized_xy",
++            _readonly_array(self.normalized_xy, shape=(count, 2), name="normalized_xy"),
++        )
++        object.__setattr__(
++            self,
++            "tangent_xy",
++            _readonly_array(self.tangent_xy, shape=(count, 2), name="tangent_xy"),
++        )
++        object.__setattr__(
++            self,
++            "heading_rate",
++            _readonly_array(self.heading_rate, shape=(count,), name="heading_rate"),
++        )
++        scalars = (self.total_turn_deg, self.endpoint_displacement_ratio, self.signed_turn_energy)
++        if not np.isfinite(scalars).all():
++            raise ValueError("descriptor metrics must be finite")
++        if self.endpoint_displacement_ratio < 0.0:
++            raise ValueError("endpoint_displacement_ratio must be nonnegative")
++
++
++def trajectory_descriptor(
++    points: ArrayLike,
++    *,
++    samples: int = 64,
++    smoothing_window: int = 5,
++) -> TrajectoryDescriptor:
++    """Build a deterministic directed descriptor from ordered 2D points.
++
++    Points are resampled uniformly by chord length, translated to the origin,
++    normalized to unit length, and rotated so the starting tangent points along
++    +x. Input points are never reversed or mutated.
++    """
++    samples = _require_integer(samples, name="samples", minimum=2)
++    smoothing_window = _require_integer(smoothing_window, name="smoothing_window", minimum=1)
++    values = np.asarray(points, dtype=float)
++    if values.ndim != 2 or values.shape[1] != 2 or values.shape[0] < 2:
++        raise ValueError("points must have shape (N, 2) with N >= 2")
++    if not np.isfinite(values).all():
++        raise ValueError("points must be finite")
++    sampled = resample_polyline_by_arclength(values, samples)
++    length = float(np.sum(np.linalg.norm(np.diff(sampled, axis=0), axis=1)))
++    if not isfinite(length) or length <= 1e-12:
++        raise ValueError("trajectory must have positive length")
++    normalized = (sampled - sampled[0]) / length
++    normalized[0] = 0.0
++    canonical_xy, tangents = _canonical_tangents(normalized, smoothing_window)
++    tangent_heading = np.unwrap(np.arctan2(tangents[:, 1], tangents[:, 0]))
++    progress = np.linspace(0.0, 1.0, samples)
++    heading_rate = np.gradient(tangent_heading, progress)
++    if smoothing_window > 1:
++        padding = (smoothing_window // 2, smoothing_window - 1 - smoothing_window // 2)
++        padded = np.pad(heading_rate, padding, mode="edge")
++        heading_rate = np.convolve(
++            padded,
++            np.ones(smoothing_window) / smoothing_window,
++            mode="valid",
++        )
++    heading_changes = np.diff(tangent_heading)
++    heading_changes = np.diff(tangent_heading)
++    signed_turn_energy = float(
++        np.sum(heading_changes * np.abs(heading_changes)) * (180.0 / np.pi) ** 2
++    )
++    return TrajectoryDescriptor(
++        sample_count=samples,
++        normalized_xy=canonical_xy,
++        tangent_xy=tangents,
++        heading_rate=np.rad2deg(heading_rate),
++        total_turn_deg=float(np.rad2deg(tangent_heading[-1] - tangent_heading[0])),
++        endpoint_displacement_ratio=float(np.linalg.norm(canonical_xy[-1])),
++        signed_turn_energy=signed_turn_energy,
++    )
++
++
++def reverse_descriptor(descriptor: TrajectoryDescriptor) -> TrajectoryDescriptor:
++    """Return a descriptor of the same geometry traversed in reverse."""
++    if not isinstance(descriptor, TrajectoryDescriptor):
++        raise TypeError("descriptor must be a TrajectoryDescriptor")
++    raw_xy = descriptor.normalized_xy[::-1] - descriptor.normalized_xy[-1]
++    raw_tangent = -descriptor.tangent_xy[::-1]
++    start_angle = float(np.arctan2(raw_tangent[0, 1], raw_tangent[0, 0]))
++    rotation = _canonical_rotation(start_angle)
++    return TrajectoryDescriptor(
++        sample_count=descriptor.sample_count,
++        normalized_xy=raw_xy @ rotation.T,
++        tangent_xy=raw_tangent @ rotation.T,
++        heading_rate=-descriptor.heading_rate[::-1],
++        total_turn_deg=-descriptor.total_turn_deg,
++        endpoint_displacement_ratio=descriptor.endpoint_displacement_ratio,
++        signed_turn_energy=-descriptor.signed_turn_energy,
++    )
++
++
++def descriptor_distance(
++    first: TrajectoryDescriptor,
++    second: TrajectoryDescriptor,
++    *,
++    weights: Mapping[str, float] | None = None,
++) -> float:
++    """Return a weighted RMS distance between compatible descriptors.
++
++    Feature differences are dimensionless: angles and heading rates are scaled
++    by 360 degrees, while signed turn energy is scaled by 360 squared.
++    """
++    if not isinstance(first, TrajectoryDescriptor) or not isinstance(second, TrajectoryDescriptor):
++        raise TypeError("both inputs must be TrajectoryDescriptor values")
++    if first.sample_count != second.sample_count:
++        raise ValueError("descriptors must have matching sample_count")
++    selected = _DEFAULT_WEIGHTS if weights is None else dict(weights)
++    if set(selected) - set(_DESCRIPTOR_FIELDS):
++        raise ValueError("weights contain an unknown descriptor field")
++    normalized_weights = {name: float(selected.get(name, 0.0)) for name in _DESCRIPTOR_FIELDS}
++    if not np.isfinite(list(normalized_weights.values())).all() or any(
++        weight < 0.0 for weight in normalized_weights.values()
++    ):
++        raise ValueError("weights must be finite and nonnegative")
++    total_weight = sum(normalized_weights.values())
++    if total_weight <= 0.0:
++        raise ValueError("at least one descriptor weight must be positive")
++    differences = {
++        "normalized_xy": float(
++            np.sqrt(
++                np.mean(np.sum((first.normalized_xy - second.normalized_xy) ** 2, axis=1))
++            )
++        ),
++        "tangent_xy": float(
++            np.sqrt(np.mean(np.sum((first.tangent_xy - second.tangent_xy) ** 2, axis=1)))
++        ),
++        "heading_rate": float(
++            np.sqrt(np.mean((first.heading_rate - second.heading_rate) ** 2)) / 360.0
++        ),
++        "total_turn_deg": abs(first.total_turn_deg - second.total_turn_deg) / 360.0,
++        "endpoint_displacement_ratio": abs(
++            first.endpoint_displacement_ratio - second.endpoint_displacement_ratio
++        ),
++        "signed_turn_energy": abs(first.signed_turn_energy - second.signed_turn_energy) / 360.0**2,
++    }
++    return float(
++        np.sqrt(
++            sum(
++                normalized_weights[name] * difference**2
++                for name, difference in differences.items()
++            )
++            / total_weight
++        )
++    )
+diff --git a/planarcurve/fitting/__init__.py b/planarcurve/fitting/__init__.py
+index 5abd92d..30519f5 100644
+--- a/planarcurve/fitting/__init__.py
++++ b/planarcurve/fitting/__init__.py
+@@ -1,3 +1,15 @@
++from .family import (
++    TrajectoryFamilyFitResult,
++    TrajectoryFamilyModel,
++    TrajectoryOccurrenceFit,
++    TrajectoryVariationPolicy,
++    fit_trajectory_family,
++)
++from .model_selection import (
++    TrajectoryModelSelectionOptions,
++    select_shared_trajectory_model,
++)
++from .parameters import HeadingRateParameterization
+ from .policy import SplineEndpointPolicy
+ from .trajectory import (
+     SharedTrajectoryFitResult,
+@@ -8,10 +20,18 @@ from .trajectory import (
+ )
+
+ __all__ = [
++    "HeadingRateParameterization",
+     "SharedTrajectoryFitResult",
+     "SplineEndpointPolicy",
++    "TrajectoryFamilyFitResult",
++    "TrajectoryFamilyModel",
+     "TrajectoryFitOptions",
+     "TrajectoryFitResult",
++    "TrajectoryModelSelectionOptions",
++    "TrajectoryOccurrenceFit",
++    "TrajectoryVariationPolicy",
+     "fit_shared_trajectory_profile",
+     "fit_trajectory",
++    "fit_trajectory_family",
++    "select_shared_trajectory_model",
+ ]
+diff --git a/planarcurve/fitting/family.py b/planarcurve/fitting/family.py
+new file mode 100644
+index 0000000..623fc20
+--- /dev/null
++++ b/planarcurve/fitting/family.py
+@@ -0,0 +1,436 @@
++"""Shared directed trajectory family fitting and occurrence diagnostics."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping, Sequence
++from dataclasses import dataclass
++from types import MappingProxyType
++
++import numpy as np
++from numpy.typing import ArrayLike
++
++try:
++    from scipy.optimize import least_squares
++except ImportError as exc:  # pragma: no cover - optional fitting extra
++    raise ImportError(
++        "planarcurve.fitting.family requires SciPy; install planarcurve[fit]"
++    ) from exc
++
++from ..trajectory import HeadingRateChange, HeadingRateProfile, Trajectory2D, trajectory_total_turn
++from ..transforms import Similarity2D
++from ..types import _require_integer
++from .parameters import decode_positive, encode_positive
++from .trajectory import (
++    TrajectoryFitOptions,
++    _mapped_state,
++    _profile_residuals,
++    _target_state,
++    fit_shared_trajectory_profile,
++)
++
++
++def _finite_metrics(values: Mapping[str, float], *, name: str) -> Mapping[str, float]:
++    copied = {str(key): float(value) for key, value in values.items()}
++    if not all(np.isfinite(value) for value in copied.values()):
++        raise ValueError(f"{name} values must be finite")
++    return MappingProxyType(copied)
++
++
++@dataclass(frozen=True)
++class TrajectoryVariationPolicy:
++    """Optional bounded per-occurrence rate deviations around the family mean.
++
++    ``rate_sigma`` is both the hard absolute deviation bound for each rate knot
++    and the scale of its quadratic regularization residual. Change positions and
++    model order remain shared. Position offsets are reserved and currently
++    rejected when enabled.
++    """
++
++    allow_rate_offsets: bool = True
++    allow_change_position_offsets: bool = False
++    rate_sigma: float = 25.0
++    position_sigma: float = 0.02
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.allow_rate_offsets, bool) or not isinstance(
++            self.allow_change_position_offsets, bool
++        ):
++            raise ValueError("variation policy flags must be booleans")
++        if not np.isfinite(self.rate_sigma) or self.rate_sigma <= 0.0:
++            raise ValueError("rate_sigma must be positive and finite")
++        if not np.isfinite(self.position_sigma) or self.position_sigma <= 0.0:
++            raise ValueError("position_sigma must be positive and finite")
++
++
++@dataclass(frozen=True)
++class TrajectoryFamilyModel:
++    """A reusable shared mean trajectory and observed family dispersion."""
++
++    trajectory: Trajectory2D
++    change_count: int
++    parameter_scale: Mapping[str, float]
++    training_occurrences: int
++    fit_metrics: Mapping[str, float]
++
++    def __post_init__(self) -> None:
++        count = _require_integer(self.change_count, name="change_count", minimum=0)
++        occurrences = _require_integer(
++            self.training_occurrences, name="training_occurrences", minimum=1
++        )
++        if len(self.trajectory.heading_rate.changes) != count:
++            raise ValueError("change_count must match the trajectory profile")
++        scales = _finite_metrics(self.parameter_scale, name="parameter_scale")
++        if any(value < 0.0 for value in scales.values()):
++            raise ValueError("parameter scales must be nonnegative")
++        object.__setattr__(self, "change_count", count)
++        object.__setattr__(self, "training_occurrences", occurrences)
++        object.__setattr__(self, "parameter_scale", scales)
++        object.__setattr__(
++            self, "fit_metrics", _finite_metrics(self.fit_metrics, name="fit_metrics")
++        )
++
++@dataclass(frozen=True)
++class TrajectoryOccurrenceFit:
++    """Fit diagnostics for one ordered observation in a trajectory family.
++
++    Position and endpoint errors are normalized by the observation's arc length.
++    ``robust_cost`` includes the rate-deviation penalty when variation is used.
++    """
++
++    transform: Similarity2D
++    position_rmse: float
++    heading_rmse_deg: float
++    endpoint_error: float
++    turn_error_deg: float
++    robust_cost: float
++    accepted: bool
++    optimizer_success: bool
++    optimizer_evaluations: int
++    rate_deviation: tuple[float, ...] = ()
++
++    def __post_init__(self) -> None:
++        metrics = (
++            self.position_rmse,
++            self.heading_rmse_deg,
++            self.endpoint_error,
++            self.turn_error_deg,
++            self.robust_cost,
++            *self.rate_deviation,
++        )
++        if not np.isfinite(metrics).all():
++            raise ValueError("occurrence metrics and rate deviations must be finite")
++        if any(value < 0.0 for value in metrics[:5]):
++            raise ValueError("occurrence error metrics and robust cost must be nonnegative")
++        object.__setattr__(self, "optimizer_evaluations", _require_integer(
++            self.optimizer_evaluations, name="optimizer_evaluations", minimum=0
++        ))
++        object.__setattr__(
++            self,
++            "rate_deviation",
++            tuple(float(value) for value in self.rate_deviation),
++        )
++
++
++@dataclass(frozen=True)
++class TrajectoryFamilyFitResult:
++    """Family fit with independently inspectable training and complexity costs."""
++
++    model: TrajectoryFamilyModel
++    occurrences: tuple[TrajectoryOccurrenceFit, ...]
++    success: bool
++    training_cost: float
++    validation_cost: float | None
++    complexity_cost: float
++    score: float
++
++    def __post_init__(self) -> None:
++        occurrences = tuple(self.occurrences)
++        if len(occurrences) != self.model.training_occurrences:
++            raise ValueError("occurrence results must match model.training_occurrences")
++        if not all(
++            np.isfinite(value) and value >= 0.0
++            for value in (self.training_cost, self.complexity_cost, self.score)
++        ):
++            raise ValueError("family costs must be finite and nonnegative")
++        if self.validation_cost is not None and (
++            not np.isfinite(self.validation_cost) or self.validation_cost < 0.0
++        ):
++            raise ValueError("validation_cost must be nonnegative and finite")
++        object.__setattr__(self, "occurrences", occurrences)
++
++
++def _trajectory_with_rate_offsets(
++    trajectory: Trajectory2D, offsets: np.ndarray
++) -> Trajectory2D:
++    profile = trajectory.heading_rate
++    changes = tuple(
++        HeadingRateChange(change.at, change.heading_rate_deg_per_u + float(offset))
++        for change, offset in zip(profile.changes, offsets[1:-1], strict=True)
++    )
++    return Trajectory2D(
++        length=trajectory.length,
++        start_heading_deg=trajectory.start_heading_deg,
++        heading_rate=HeadingRateProfile(
++            start_rate_deg_per_u=profile.start_rate_deg_per_u + float(offsets[0]),
++            changes=changes,
++            end_rate_deg_per_u=profile.end_rate_deg_per_u + float(offsets[-1]),
++            interpolation=profile.interpolation,
++        ),
++    )
++
++
++def _soft_l1_cost(residuals: np.ndarray, scale: float) -> float:
++    scaled = residuals / scale
++    return float(scale**2 * np.sum(np.sqrt(1.0 + scaled**2) - 1.0))
++
++
++def _occurrence_metrics(
++    trajectory: Trajectory2D,
++    transform: Similarity2D,
++    points: ArrayLike,
++    options: TrajectoryFitOptions,
++) -> tuple[float, float, float, float, np.ndarray]:
++    target_points, target_heading, target_length = _target_state(points, options)
++    mapped, fitted_heading = _mapped_state(trajectory, transform, len(target_points))
++    position_errors = np.linalg.norm(mapped - target_points, axis=1)
++    heading_errors = (fitted_heading - target_heading + 180.0) % 360.0 - 180.0
++    endpoint_error = max(position_errors[0], position_errors[-1]) / target_length
++    position_rmse = float(np.sqrt(np.mean(position_errors**2)) / target_length)
++    heading_rmse = float(np.sqrt(np.mean(heading_errors**2)))
++    observed_turn = float(target_heading[-1] - target_heading[0])
++    turn_error = abs(trajectory_total_turn(trajectory) - observed_turn)
++    residuals = _profile_residuals(
++        trajectory,
++        target_points,
++        target_heading,
++        target_length,
++        transform,
++        options,
++    )
++    return position_rmse, heading_rmse, float(endpoint_error), float(turn_error), residuals
++
++
++def _fit_occurrence_with_variation(
++    trajectory: Trajectory2D,
++    points: ArrayLike,
++    transform: Similarity2D,
++    options: TrajectoryFitOptions,
++    policy: TrajectoryVariationPolicy,
++    rng: np.random.Generator,
++) -> tuple[Trajectory2D, Similarity2D, np.ndarray, bool, int, float]:
++    rate_count = options.change_count + 2
++    initial = np.concatenate(
++        (
++            np.zeros(rate_count),
++            [
++                encode_positive(transform.scale),
++                transform.rotation_deg,
++                transform.dx,
++                transform.dy,
++            ],
++        )
++    )
++    base_rates = np.asarray(
++        [
++            trajectory.heading_rate.start_rate_deg_per_u,
++            *(change.heading_rate_deg_per_u for change in trajectory.heading_rate.changes),
++            trajectory.heading_rate.end_rate_deg_per_u,
++        ]
++    )
++    rate_lower = np.maximum(
++        -policy.rate_sigma,
++        -options.max_heading_rate_deg_per_u - base_rates,
++    )
++    rate_upper = np.minimum(
++        policy.rate_sigma,
++        options.max_heading_rate_deg_per_u - base_rates,
++    )
++    lower = np.concatenate((rate_lower, np.full(4, -np.inf)))
++    upper = np.concatenate((rate_upper, np.full(4, np.inf)))
++    target_points, target_heading, target_length = _target_state(points, options)
++
++    def decode(values: np.ndarray) -> tuple[Trajectory2D, Similarity2D]:
++        occurrence_trajectory = _trajectory_with_rate_offsets(trajectory, values[:rate_count])
++        base = rate_count
++        occurrence_transform = Similarity2D(
++            scale=decode_positive(float(values[base])),
++            rotation_deg=float(values[base + 1]),
++            dx=float(values[base + 2]),
++            dy=float(values[base + 3]),
++        )
++        return occurrence_trajectory, occurrence_transform
++
++    def residuals(values: np.ndarray) -> np.ndarray:
++        occurrence_trajectory, occurrence_transform = decode(values)
++        fit_residuals = _profile_residuals(
++            occurrence_trajectory,
++            target_points,
++            target_heading,
++            target_length,
++            occurrence_transform,
++            options,
++        )
++        return np.concatenate((fit_residuals, values[:rate_count] / policy.rate_sigma))
++
++    best = None
++    for attempt in range(options.restarts + 1):
++        initial_values = initial.copy()
++        if attempt:
++            initial_values[:rate_count] = np.clip(
++                rng.normal(0.0, policy.rate_sigma * 0.1, rate_count),
++                lower[:rate_count],
++                upper[:rate_count],
++            )
++            initial_values[rate_count] += rng.normal(0.0, 0.05)
++            initial_values[rate_count + 1] += rng.normal(0.0, 2.0)
++            initial_values[rate_count + 2 :] += rng.normal(0.0, target_length * 0.01, 2)
++        result = least_squares(
++            residuals,
++            initial_values,
++            bounds=(lower, upper),
++            loss="soft_l1",
++            f_scale=options.robust_scale,
++            max_nfev=options.max_nfev,
++        )
++        if best is None or result.cost < best.cost:
++            best = result
++
++    occurrence_trajectory, occurrence_transform = decode(best.x)
++    deviations = best.x[:rate_count].copy()
++    return (
++        occurrence_trajectory,
++        occurrence_transform,
++        deviations,
++        bool(best.success),
++        int(best.nfev),
++        float(best.cost),
++    )
++
++
++def fit_trajectory_family(
++    occurrences: Sequence[ArrayLike],
++    *,
++    fit_options: TrajectoryFitOptions,
++    variation_policy: TrajectoryVariationPolicy | None = None,
++) -> TrajectoryFamilyFitResult:
++    """Fit one directed shared trajectory to several ordered observations.
++
++    The default shares an exact profile and fits a positive similarity transform
++    per occurrence. When a rate variation policy is supplied, bounded rate
++    offsets are fitted per occurrence with the profile topology and knot
++    positions fixed. Input orientations are never searched or reversed.
++    """
++    if not occurrences:
++        raise ValueError("at least one occurrence is required")
++    if not isinstance(fit_options, TrajectoryFitOptions):
++        raise TypeError("fit_options must be TrajectoryFitOptions")
++    if variation_policy is not None and not isinstance(
++        variation_policy, TrajectoryVariationPolicy
++    ):
++        raise TypeError("variation_policy must be a TrajectoryVariationPolicy or None")
++    if variation_policy is not None and variation_policy.allow_change_position_offsets:
++        raise NotImplementedError("per-occurrence change-position offsets are not supported")
++
++    shared = fit_shared_trajectory_profile(occurrences, fit_options)
++    trajectory = shared.trajectory
++    transforms = shared.transforms
++    deviations = [np.zeros(fit_options.change_count + 2) for _ in occurrences]
++    optimizer_status = [(shared.success, shared.optimizer_evaluations) for _ in occurrences]
++    robust_costs = []
++
++    if variation_policy is not None and variation_policy.allow_rate_offsets:
++        rng = np.random.default_rng(fit_options.seed)
++        varied = [
++            _fit_occurrence_with_variation(
++                trajectory, points, transform, fit_options, variation_policy, rng
++            )
++            for points, transform in zip(occurrences, transforms, strict=True)
++        ]
++        transforms = tuple(item[1] for item in varied)
++        deviations = [item[2] for item in varied]
++        optimizer_status = [(item[3], item[4]) for item in varied]
++        trajectories = [item[0] for item in varied]
++        robust_costs = [item[5] for item in varied]
++    else:
++        trajectories = [trajectory] * len(occurrences)
++
++    occurrence_results = []
++    for index, (points, occurrence_trajectory, transform) in enumerate(
++        zip(occurrences, trajectories, transforms, strict=True)
++    ):
++        position_rmse, heading_rmse, endpoint_error, turn_error, residuals = _occurrence_metrics(
++            occurrence_trajectory, transform, points, fit_options
++        )
++        robust_cost = (
++            robust_costs[index]
++            if robust_costs
++            else _soft_l1_cost(residuals, fit_options.robust_scale)
++        )
++        occurrence_results.append(
++            TrajectoryOccurrenceFit(
++                transform=transform,
++                position_rmse=position_rmse,
++                heading_rmse_deg=heading_rmse,
++                endpoint_error=endpoint_error,
++                turn_error_deg=turn_error,
++                robust_cost=robust_cost,
++                accepted=True,
++                optimizer_success=optimizer_status[index][0],
++                optimizer_evaluations=optimizer_status[index][1],
++                rate_deviation=tuple(float(value) for value in deviations[index]),
++            )
++        )
++
++    costs = np.asarray([item.robust_cost for item in occurrence_results])
++    median_cost = float(np.median(costs))
++    mad = float(np.median(np.abs(costs - median_cost)))
++    acceptance_limit = median_cost + max(3.0 * 1.4826 * mad, 0.05 * max(median_cost, 1e-8))
++    occurrence_results = [
++        TrajectoryOccurrenceFit(
++            transform=item.transform,
++            position_rmse=item.position_rmse,
++            heading_rmse_deg=item.heading_rmse_deg,
++            endpoint_error=item.endpoint_error,
++            turn_error_deg=item.turn_error_deg,
++            robust_cost=item.robust_cost,
++            accepted=item.robust_cost <= acceptance_limit,
++            optimizer_success=item.optimizer_success,
++            optimizer_evaluations=item.optimizer_evaluations,
++            rate_deviation=item.rate_deviation,
++        )
++        for item in occurrence_results
++    ]
++
++    rate_deviation_matrix = np.asarray(deviations)
++    parameter_scale = {
++        f"rate_{index}": float(np.std(rate_deviation_matrix[:, index]))
++        for index in range(rate_deviation_matrix.shape[1])
++    }
++    position_errors = [item.position_rmse for item in occurrence_results]
++    heading_errors = [item.heading_rmse_deg for item in occurrence_results]
++    model = TrajectoryFamilyModel(
++        trajectory=trajectory,
++        change_count=fit_options.change_count,
++        parameter_scale=parameter_scale,
++        training_occurrences=len(occurrences),
++        fit_metrics={
++            "mean_position_rmse": float(np.mean(position_errors)),
++            "median_position_rmse": float(np.median(position_errors)),
++            "mean_heading_rmse_deg": float(np.mean(heading_errors)),
++            "accepted_occurrences": float(sum(item.accepted for item in occurrence_results)),
++            "optimizer_evaluations": float(
++                sum(item.optimizer_evaluations for item in occurrence_results)
++            ),
++        },
++    )
++    training_cost = float(sum(item.robust_cost for item in occurrence_results))
++    complexity_cost = float(2 * fit_options.change_count + 2 + 4 * len(occurrences))
++    return TrajectoryFamilyFitResult(
++        model=model,
++        occurrences=tuple(occurrence_results),
++        success=shared.success and all(item.optimizer_success for item in occurrence_results),
++        training_cost=training_cost,
++        validation_cost=None,
++        complexity_cost=complexity_cost,
++        score=training_cost + complexity_cost,
++    )
+diff --git a/planarcurve/fitting/model_selection.py b/planarcurve/fitting/model_selection.py
+new file mode 100644
+index 0000000..27338b2
+--- /dev/null
++++ b/planarcurve/fitting/model_selection.py
+@@ -0,0 +1,191 @@
++"""Deterministic model-order selection for shared trajectory families."""
++
++from __future__ import annotations
++
++from collections.abc import Sequence
++from dataclasses import dataclass, replace
++from math import isfinite, log1p
++
++import numpy as np
++from numpy.typing import ArrayLike
++
++try:
++    from scipy.optimize import least_squares
++except ImportError as exc:  # pragma: no cover - optional fitting extra
++    raise ImportError(
++        "planarcurve.fitting.model_selection requires SciPy; install planarcurve[fit]"
++    ) from exc
++
++from ..trajectory import Trajectory2D, evaluate_trajectory
++from ..transforms import Similarity2D
++from ..types import _require_integer
++from .family import TrajectoryFamilyFitResult, fit_trajectory_family
++from .parameters import decode_positive, encode_positive
++from .trajectory import (
++    TrajectoryFitOptions,
++    _profile_residuals,
++    _target_state,
++)
++
++
++@dataclass(frozen=True)
++class TrajectoryModelSelectionOptions:
++    """Selection settings and explicit numerical complexity-penalty controls.
++
++    Complexity is ``complexity_weight * parameter_count * log1p(1 / parameter_precision)``.
++    ``parameter_precision`` is a dimensionless resolution factor in ``(0, 1]``;
++    this is a practical regularizer, not a universal MDL score.
++    """
++
++    change_counts: tuple[int, ...] = (0, 1, 2, 3, 4)
++    validation_fraction: float = 0.2
++    complexity_weight: float = 0.01
++    parameter_precision: float = 1e-3
++    seed: int = 0
++
++    def __post_init__(self) -> None:
++        counts = tuple(
++            _require_integer(value, name="change_counts", minimum=0)
++            for value in self.change_counts
++        )
++        if not counts or len(set(counts)) != len(counts):
++            raise ValueError(
++                "change_counts must be a nonempty tuple of unique nonnegative integers"
++            )
++        object.__setattr__(self, "change_counts", counts)
++        if not isfinite(self.validation_fraction) or not 0.0 <= self.validation_fraction < 1.0:
++            raise ValueError("validation_fraction must lie in [0, 1)")
++        if not isfinite(self.complexity_weight) or self.complexity_weight < 0.0:
++            raise ValueError("complexity_weight must be finite and nonnegative")
++        if not isfinite(self.parameter_precision) or not 0.0 < self.parameter_precision <= 1.0:
++            raise ValueError("parameter_precision must lie in (0, 1]")
++        object.__setattr__(self, "seed", _require_integer(self.seed, name="seed"))
++
++
++def _split_indices(
++    count: int, options: TrajectoryModelSelectionOptions
++) -> tuple[np.ndarray, np.ndarray]:
++    if count < 3 or options.validation_fraction == 0.0:
++        indices = np.arange(count)
++        return indices, np.empty(0, dtype=int)
++    validation_count = min(
++        count - 2,
++        max(1, int(round(count * options.validation_fraction))),
++    )
++    shuffled = np.random.default_rng(options.seed).permutation(count)
++    return shuffled[validation_count:], shuffled[:validation_count]
++
++
++def _validation_cost(
++    trajectory: Trajectory2D,
++    occurrences: Sequence[ArrayLike],
++    options: TrajectoryFitOptions,
++) -> float:
++    per_occurrence_costs = []
++    for points in occurrences:
++        target_points, target_heading, target_length = _target_state(points, options)
++
++        trajectory_xy = evaluate_trajectory(trajectory, count=options.samples).xy
++        unit_end_length = float(np.linalg.norm(trajectory_xy[-1]))
++        initial_transform = Similarity2D(
++            scale=target_length / max(unit_end_length, 1e-9),
++            rotation_deg=float(target_heading[0]),
++            dx=float(target_points[0, 0]),
++            dy=float(target_points[0, 1]),
++        )
++        initial = np.asarray(
++            [
++                encode_positive(initial_transform.scale),
++                initial_transform.rotation_deg,
++                initial_transform.dx,
++                initial_transform.dy,
++            ]
++        )
++
++        def residuals(
++            values: np.ndarray,
++            target_points: np.ndarray = target_points,
++            target_heading: np.ndarray = target_heading,
++            target_length: float = target_length,
++        ) -> np.ndarray:
++            transform = Similarity2D(
++                scale=decode_positive(float(values[0])),
++                rotation_deg=float(values[1]),
++                dx=float(values[2]),
++                dy=float(values[3]),
++            )
++            return _profile_residuals(
++                trajectory,
++                target_points,
++                target_heading,
++                target_length,
++                transform,
++                options,
++            )
++
++        result = least_squares(
++            residuals,
++            initial,
++            loss="soft_l1",
++            f_scale=options.robust_scale,
++            max_nfev=options.max_nfev,
++        )
++        per_occurrence_costs.append(float(result.cost))
++    return float(sum(per_occurrence_costs))
++
++
++def select_shared_trajectory_model(
++    occurrences: Sequence[ArrayLike],
++    *,
++    fit_options: TrajectoryFitOptions,
++    selection_options: TrajectoryModelSelectionOptions,
++) -> TrajectoryFamilyFitResult:
++    """Fit every requested change count and return the lowest-scoring family.
++
++    Validation is split by occurrence using ``selection_options.seed``. For
++    fewer than three observations, or when validation is disabled, all inputs
++    are used for training and ``validation_cost`` is ``None``.
++    """
++    if not occurrences:
++        raise ValueError("at least one occurrence is required")
++    if not isinstance(fit_options, TrajectoryFitOptions):
++        raise TypeError("fit_options must be TrajectoryFitOptions")
++    if not isinstance(selection_options, TrajectoryModelSelectionOptions):
++        raise TypeError("selection_options must be TrajectoryModelSelectionOptions")
++    train_indices, validation_indices = _split_indices(len(occurrences), selection_options)
++    training = [occurrences[index] for index in train_indices]
++    validation = [occurrences[index] for index in validation_indices]
++    complexity_factor = selection_options.complexity_weight * log1p(
++        1.0 / selection_options.parameter_precision
++    )
++
++    candidates = []
++    for change_count in selection_options.change_counts:
++        candidate_options = replace(
++            fit_options,
++            change_count=change_count,
++            seed=selection_options.seed,
++        )
++        result = fit_trajectory_family(training, fit_options=candidate_options)
++        validation_cost = (
++            _validation_cost(result.model.trajectory, validation, candidate_options)
++            if validation
++            else None
++        )
++        parameter_count = 2 * change_count + 2 + 4 * len(training)
++        complexity_cost = complexity_factor * parameter_count
++        score = result.training_cost + complexity_cost
++        if validation_cost is not None:
++            score += validation_cost
++        candidates.append(
++            replace(
++                result,
++                validation_cost=validation_cost,
++                complexity_cost=complexity_cost,
++                score=score,
++            )
++        )
++
++    converged = [candidate for candidate in candidates if candidate.success]
++    pool = converged or candidates
++    return min(pool, key=lambda candidate: (candidate.score, candidate.model.change_count))
+diff --git a/planarcurve/fitting/parameters.py b/planarcurve/fitting/parameters.py
+index 66de607..619e247 100644
+--- a/planarcurve/fitting/parameters.py
++++ b/planarcurve/fitting/parameters.py
+@@ -2,10 +2,14 @@
+
+ from __future__ import annotations
+
++from dataclasses import dataclass
++from typing import ClassVar, Literal
++
+ import numpy as np
+ from numpy.typing import ArrayLike
+
+-from ..types import FloatArray
++from ..trajectory import HeadingRateChange, HeadingRateProfile
++from ..types import FloatArray, _require_integer
+
+
+ def ordered_positions_from_logits(
+@@ -111,3 +115,105 @@ def _validate_interval(low: float, high: float) -> None:
+ def _validate_spacing(min_spacing: float) -> None:
+     if not np.isfinite(min_spacing) or min_spacing < 0.0:
+         raise ValueError("min_spacing must be finite and nonnegative")
++
++
++@dataclass(frozen=True)
++class HeadingRateParameterization:
++    """Version 1 codec for normalized heading-rate profile parameters.
++
++    The encoded vector stores ordered-position logits followed by bounded rate
++    logits. Interpolation is configuration, not encoded data, so encode and
++    decode require the configured interpolation kind to match the profile.
++    Rates decode strictly inside their configured symmetric bound.
++    """
++
++    change_count: int
++    min_change_spacing: float
++    max_heading_rate_deg_per_u: float
++    interpolation: Literal["linear", "cubic-hermite"] = "cubic-hermite"
++
++    version: ClassVar[int] = 1
++
++    def __post_init__(self) -> None:
++        count = _require_integer(self.change_count, name="change_count", minimum=0)
++        object.__setattr__(self, "change_count", count)
++        if not np.isfinite(self.min_change_spacing) or self.min_change_spacing < 0.0:
++            raise ValueError("min_change_spacing must be finite and nonnegative")
++        if (count - 1) * self.min_change_spacing >= 1.0:
++            raise ValueError("minimum spacing is too large for the requested changes")
++        if (
++            not np.isfinite(self.max_heading_rate_deg_per_u)
++            or self.max_heading_rate_deg_per_u <= 0.0
++        ):
++            raise ValueError("maximum heading rate must be positive and finite")
++        if self.interpolation not in {"linear", "cubic-hermite"}:
++            raise ValueError("interpolation must be 'linear' or 'cubic-hermite'")
++
++    @property
++    def size(self) -> int:
++        """Number of scalar values in the encoded vector."""
++        return 2 * self.change_count + 2
++
++    def encode(self, profile: HeadingRateProfile) -> FloatArray:
++        """Encode a profile while validating its topology and interpolation."""
++        if not isinstance(profile, HeadingRateProfile):
++            raise TypeError("profile must be a HeadingRateProfile")
++        if len(profile.changes) != self.change_count:
++            raise ValueError("profile change count does not match parameterization")
++        if profile.interpolation != self.interpolation:
++            raise ValueError("profile interpolation does not match parameterization")
++        positions = np.asarray([change.at for change in profile.changes], dtype=float)
++        position_logits = ordered_positions_to_logits(
++            positions, min_spacing=self.min_change_spacing
++        )
++        if self.change_count:
++            position_logits = position_logits[:-1] - position_logits[-1]
++        limit = self.max_heading_rate_deg_per_u
++        rates = np.asarray(
++            [
++                profile.start_rate_deg_per_u,
++                *(change.heading_rate_deg_per_u for change in profile.changes),
++                profile.end_rate_deg_per_u,
++            ],
++            dtype=float,
++        )
++        if np.any(np.abs(rates) > limit):
++            raise ValueError("profile heading rates exceed max_heading_rate_deg_per_u")
++        rate_logits = np.asarray(
++            [
++                encode_interval(
++                    float(np.clip(rate, -limit * (1.0 - 1e-12), limit * (1.0 - 1e-12))),
++                    low=-limit,
++                    high=limit,
++                )
++                for rate in rates
++            ],
++            dtype=float,
++        )
++        return np.concatenate((position_logits, rate_logits))
++
++    def decode(self, values: ArrayLike) -> HeadingRateProfile:
++        """Decode finite parameter values into an ordered heading-rate profile."""
++        encoded = np.asarray(values, dtype=float)
++        if encoded.shape != (self.size,) or not np.isfinite(encoded).all():
++            raise ValueError(f"values must be a finite 1-D array with length {self.size}")
++        count = self.change_count
++        positions = ordered_positions_from_logits(
++            np.concatenate((encoded[:count], [0.0])),
++            min_spacing=self.min_change_spacing,
++        )
++        limit = self.max_heading_rate_deg_per_u
++        rates = np.asarray(
++            [decode_interval(float(value), low=-limit, high=limit) for value in encoded[count:]],
++            dtype=float,
++        )
++        changes = tuple(
++            HeadingRateChange(float(at), float(rate))
++            for at, rate in zip(positions, rates[1:-1], strict=True)
++        )
++        return HeadingRateProfile(
++            start_rate_deg_per_u=float(rates[0]),
++            changes=changes,
++            end_rate_deg_per_u=float(rates[-1]),
++            interpolation=self.interpolation,
++        )
+diff --git a/planarcurve/fitting/trajectory.py b/planarcurve/fitting/trajectory.py
+index 4c522d2..495b371 100644
+--- a/planarcurve/fitting/trajectory.py
++++ b/planarcurve/fitting/trajectory.py
+@@ -26,12 +26,10 @@ from ..trajectory import (
+ from ..transforms import Similarity2D
+ from ..types import FloatArray, _require_integer
+ from .parameters import (
+-    decode_interval,
++    HeadingRateParameterization,
+     decode_positive,
+-    encode_interval,
+     encode_positive,
+     ordered_positions_from_logits,
+-    ordered_positions_to_logits,
+ )
+
+
+@@ -131,46 +129,9 @@ class SharedTrajectoryFitResult:
+     success: bool
+     cost: float
+     metrics: Mapping[str, float]
++    optimizer_evaluations: int = 0
+
+
+-@dataclass(frozen=True)
+-class _ProfileCodec:
+-    options: TrajectoryFitOptions
+-
+-    @property
+-    def size(self) -> int:
+-        count = self.options.change_count
+-        return count + count + 2
+-
+-    def decode(self, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+-        count = self.options.change_count
+-        position_logits = np.concatenate((values[:count], [0.0]))
+-        positions = ordered_positions_from_logits(
+-            position_logits, min_spacing=self.options.min_change_spacing
+-        )
+-        rate_logits = values[count:]
+-        limit = self.options.max_heading_rate_deg_per_u
+-        rates = np.asarray(
+-            [decode_interval(value, low=-limit, high=limit) for value in rate_logits]
+-        )
+-        return positions, rates
+-
+-    def encode(self, positions: np.ndarray, rates: np.ndarray) -> np.ndarray:
+-        position_logits = ordered_positions_to_logits(
+-            positions, min_spacing=self.options.min_change_spacing
+-        )
+-        if self.options.change_count:
+-            position_logits = position_logits[:-1] - position_logits[-1]
+-        limit = self.options.max_heading_rate_deg_per_u
+-        rate_logits = [
+-            encode_interval(
+-                float(np.clip(rate, -limit * (1.0 - 1e-12), limit * (1.0 - 1e-12))),
+-                low=-limit,
+-                high=limit,
+-            )
+-            for rate in rates
+-        ]
+-        return np.asarray([*position_logits, *rate_logits], dtype=float)
+
+
+ def resample_by_arclength(points: ArrayLike, *, samples: int = 64) -> FloatArray:
+@@ -400,9 +361,13 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
+         than assuming that a result object implies convergence.
+     """
+     target_points, target_heading, target_length = _target_state(points, options)
+-    codec = _ProfileCodec(options)
++    codec = HeadingRateParameterization(
++        change_count=options.change_count,
++        min_change_spacing=options.min_change_spacing,
++        max_heading_rate_deg_per_u=options.max_heading_rate_deg_per_u,
++    )
+     positions, rates = _initial_profile(target_points, target_heading, options)
+-    profile_vector = codec.encode(positions, rates)
++    profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
+     initial_trajectory = _trajectory_from(positions, rates)
+     initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
+     unit_end_length = float(np.linalg.norm(initial_xy[-1]))
+@@ -425,8 +390,11 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
+     )
+
+     def decode(values: np.ndarray) -> tuple[Trajectory2D, Similarity2D]:
+-        event_positions, event_rates = codec.decode(values[: codec.size])
+-        trajectory = _trajectory_from(event_positions, event_rates)
++        trajectory = Trajectory2D(
++            length=1.0,
++            start_heading_deg=0.0,
++            heading_rate=codec.decode(values[: codec.size]),
++        )
+         base = codec.size
+         transform = Similarity2D(
+             scale=decode_positive(float(values[base])),
+@@ -493,11 +461,15 @@ def fit_shared_trajectory_profile(
+     if not occurrences:
+         raise ValueError("at least one occurrence is required")
+     states = [_target_state(points, options) for points in occurrences]
+-    codec = _ProfileCodec(options)
++    codec = HeadingRateParameterization(
++        change_count=options.change_count,
++        min_change_spacing=options.min_change_spacing,
++        max_heading_rate_deg_per_u=options.max_heading_rate_deg_per_u,
++    )
+     initial_profiles = [_initial_profile(points, heading, options) for points, heading, _ in states]
+     positions = np.mean([item[0] for item in initial_profiles], axis=0)
+     rates = np.mean([item[1] for item in initial_profiles], axis=0)
+-    profile_vector = codec.encode(positions, rates)
++    profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
+     initial_trajectory = _trajectory_from(positions, rates)
+     initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
+     unit_end_length = float(np.linalg.norm(initial_xy[-1]))
+@@ -526,8 +498,11 @@ def fit_shared_trajectory_profile(
+     initial = np.concatenate((profile_vector, initial_transforms))
+
+     def decode(values: np.ndarray) -> tuple[Trajectory2D, tuple[Similarity2D, ...]]:
+-        event_positions, event_rates = codec.decode(values[: codec.size])
+-        trajectory = _trajectory_from(event_positions, event_rates)
++        trajectory = Trajectory2D(
++            length=1.0,
++            start_heading_deg=0.0,
++            heading_rate=codec.decode(values[: codec.size]),
++        )
+         decoded_transforms = []
+         for index in range(len(states)):
+             base = codec.size + index * 4
+@@ -584,4 +559,5 @@ def fit_shared_trajectory_profile(
+             "p95_position_error": float(np.percentile(all_position_errors, 95)),
+             "max_total_turn_error_deg": float(max(all_turn_errors)),
+         },
++        optimizer_evaluations=int(best.nfev),
+     )
+diff --git a/tests/test_fitting_parameters.py b/tests/test_fitting_parameters.py
+index 0793936..5c159b0 100644
+--- a/tests/test_fitting_parameters.py
++++ b/tests/test_fitting_parameters.py
+@@ -4,6 +4,7 @@ import numpy as np
+ import pytest
+
+ from planarcurve.fitting.parameters import (
++    HeadingRateParameterization,
+     decode_interval,
+     decode_positive,
+     encode_interval,
+@@ -11,6 +12,7 @@ from planarcurve.fitting.parameters import (
+     ordered_positions_from_logits,
+     ordered_positions_to_logits,
+ )
++from planarcurve.trajectory import HeadingRateChange, HeadingRateProfile
+
+
+ def test_ordered_positions_round_trip_and_configurable_spacing():
+@@ -54,3 +56,31 @@ def test_parameterization_rejects_invalid_domain_inputs():
+         ordered_positions_to_logits(np.array([0.6, 0.5]))
+     with pytest.raises(ValueError, match="positive"):
+         encode_positive(0.0)
++
++
++
++def test_heading_rate_parameterization_rejects_mismatched_profiles_and_values():
++    codec = HeadingRateParameterization(
++        change_count=1,
++        min_change_spacing=0.1,
++        max_heading_rate_deg_per_u=10.0,
++    )
++    profile = HeadingRateProfile(
++        start_rate_deg_per_u=1.0,
++        changes=(HeadingRateChange(0.5, 2.0),),
++        end_rate_deg_per_u=3.0,
++    )
++    assert codec.decode(codec.encode(profile)) == profile
++
++    with pytest.raises(ValueError, match="change count"):
++        codec.encode(HeadingRateProfile(1.0, 2.0))
++    with pytest.raises(ValueError, match="interpolation"):
++        codec.encode(HeadingRateProfile(1.0, 2.0, changes=profile.changes, interpolation="linear"))
++    with pytest.raises(ValueError, match="max_heading_rate"):
++        codec.encode(HeadingRateProfile(20.0, 2.0, changes=profile.changes))
++    with pytest.raises(ValueError, match="length"):
++        codec.decode(np.zeros(codec.size + 1))
++    with pytest.raises(ValueError, match="finite"):
++        codec.decode(np.full(codec.size, np.nan))
++    with pytest.raises(ValueError, match="spacing"):
++        HeadingRateParameterization(3, 0.5, 10.0)
+diff --git a/tests/test_fitting_trajectory.py b/tests/test_fitting_trajectory.py
+index 30e3123..277d0be 100644
+--- a/tests/test_fitting_trajectory.py
++++ b/tests/test_fitting_trajectory.py
+@@ -3,9 +3,9 @@ from __future__ import annotations
+ import numpy as np
+ import pytest
+
++from planarcurve.fitting.parameters import HeadingRateParameterization
+ from planarcurve.fitting.trajectory import (
+     TrajectoryFitOptions,
+-    _ProfileCodec,
+     estimate_heading_rate,
+     estimate_polyline_heading,
+     fit_shared_trajectory_profile,
+@@ -161,18 +161,45 @@ def test_change_position_initialization_stays_strictly_inside_interval():
+     assert np.all(np.diff(positions) >= 0.02)
+
+
+-def test_profile_codec_uses_only_identifiable_position_logits():
++def test_public_profile_parameterization_uses_identifiable_position_logits():
+     for change_count in (0, 2):
+-        codec = _ProfileCodec(TrajectoryFitOptions(change_count=change_count))
+         positions = np.linspace(0.3, 0.7, change_count)
+         rates = np.linspace(-20.0, 20.0, change_count + 2)
+-        encoded = codec.encode(positions, rates)
+-        decoded_positions, decoded_rates = codec.decode(encoded)
+-
+-        assert encoded.size == change_count + change_count + 2
+-        np.testing.assert_allclose(decoded_positions, positions)
+-        np.testing.assert_allclose(decoded_rates, rates)
+-
++        changes = tuple(
++            HeadingRateChange(float(at), float(rate))
++            for at, rate in zip(positions, rates[1:-1], strict=True)
++        )
++        for interpolation in ("linear", "cubic-hermite"):
++            profile = HeadingRateProfile(
++                start_rate_deg_per_u=float(rates[0]),
++                changes=changes,
++                end_rate_deg_per_u=float(rates[-1]),
++                interpolation=interpolation,
++            )
++            codec = HeadingRateParameterization(
++                change_count=change_count,
++                min_change_spacing=0.02,
++                max_heading_rate_deg_per_u=100.0,
++                interpolation=interpolation,
++            )
++            encoded = codec.encode(profile)
++            decoded = codec.decode(encoded)
++
++            assert codec.version == 1
++            assert encoded.size == 2 * change_count + 2
++            assert decoded.interpolation == interpolation
++            np.testing.assert_allclose(
++                [change.at for change in decoded.changes], positions, atol=1e-12
++            )
++            np.testing.assert_allclose(
++                [
++                    decoded.start_rate_deg_per_u,
++                    *(change.heading_rate_deg_per_u for change in decoded.changes),
++                    decoded.end_rate_deg_per_u,
++                ],
++                rates,
++                atol=1e-9,
++            )
+
+ def test_fitted_profile_is_invariant_to_coordinate_scale_and_rotation():
+     base_points = evaluate_trajectory(true_trajectory(), count=257).xy
+@@ -217,3 +244,11 @@ def test_fitting_package_exports_stable_trajectory_api():
+
+     for name in public_names:
+         assert getattr(public, name) is getattr(implementation, name)
++
++
++
++def test_heading_rate_parameterization_is_exported_from_fitting_package():
++    from planarcurve.fitting import HeadingRateParameterization as exported
++    from planarcurve.fitting.parameters import HeadingRateParameterization as implementation
++
++    assert exported is implementation
+diff --git a/tests/test_trajectory_descriptor.py b/tests/test_trajectory_descriptor.py
+new file mode 100644
+index 0000000..abd6b87
+--- /dev/null
++++ b/tests/test_trajectory_descriptor.py
+@@ -0,0 +1,109 @@
++import numpy as np
++import pytest
++
++from planarcurve.descriptors import (
++    TrajectoryDescriptor,
++    descriptor_distance,
++    reverse_descriptor,
++    trajectory_descriptor,
++)
++
++
++def _curve() -> np.ndarray:
++    parameter = np.linspace(0.0, 1.0, 200)
++    return np.column_stack((parameter, 0.35 * parameter**2 + 0.1 * parameter**3))
++
++
++def test_descriptor_is_invariant_to_translation_scale_and_rotation():
++    points = _curve()
++    angle = np.deg2rad(37.0)
++    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
++    transformed = 12.5 * points @ rotation.T + np.array([40.0, -23.0])
++
++    original = trajectory_descriptor(points)
++    actual = trajectory_descriptor(transformed)
++
++    np.testing.assert_allclose(actual.normalized_xy, original.normalized_xy, atol=2e-3)
++    np.testing.assert_allclose(actual.tangent_xy, original.tangent_xy, atol=2e-2)
++    np.testing.assert_allclose(actual.heading_rate, original.heading_rate, atol=2.0)
++    assert actual.total_turn_deg == pytest.approx(original.total_turn_deg, abs=0.1)
++    assert descriptor_distance(actual, original) < 0.01
++
++
++def test_descriptor_does_not_mutate_input_and_exposes_read_only_arrays():
++    points = _curve()
++    original = points.copy()
++    descriptor = trajectory_descriptor(points)
++
++    np.testing.assert_array_equal(points, original)
++    for values in (descriptor.normalized_xy, descriptor.tangent_xy, descriptor.heading_rate):
++        assert not values.flags.writeable
++        with pytest.raises(ValueError):
++            values[0] = 0.0
++
++
++def test_descriptor_records_direction_and_reversal_is_explicit_and_involutive():
++    descriptor = trajectory_descriptor(_curve())
++    reversed_descriptor = reverse_descriptor(descriptor)
++    twice_reversed = reverse_descriptor(reversed_descriptor)
++
++    assert descriptor_distance(descriptor, reversed_descriptor) > 0.05
++    assert reversed_descriptor.total_turn_deg == pytest.approx(-descriptor.total_turn_deg)
++    assert reversed_descriptor.signed_turn_energy == pytest.approx(-descriptor.signed_turn_energy)
++    np.testing.assert_allclose(twice_reversed.normalized_xy, descriptor.normalized_xy, atol=1e-12)
++    np.testing.assert_allclose(twice_reversed.tangent_xy, descriptor.tangent_xy, atol=1e-12)
++    np.testing.assert_allclose(twice_reversed.heading_rate, descriptor.heading_rate, atol=1e-12)
++    assert descriptor_distance(twice_reversed, descriptor) == pytest.approx(0.0, abs=1e-12)
++
++
++def test_line_and_constant_turn_arc_have_stable_signed_metrics():
++    line = trajectory_descriptor(np.array([[0.0, 0.0], [2.0, 0.0]]))
++    angle = np.linspace(0.0, np.pi / 2.0, 200)
++    arc = trajectory_descriptor(np.column_stack((np.cos(angle), np.sin(angle))))
++    reversed_arc = reverse_descriptor(arc)
++
++    assert line.total_turn_deg == pytest.approx(0.0, abs=1e-10)
++    assert arc.total_turn_deg > 80.0
++    assert reversed_arc.total_turn_deg < -80.0
++    assert arc.endpoint_displacement_ratio == pytest.approx(np.sqrt(2.0) / (np.pi / 2.0), rel=0.01)
++
++
++def test_descriptor_distance_weights_and_input_validation():
++    points = _curve()
++    first = trajectory_descriptor(points)
++    second = trajectory_descriptor(points[::-1])
++
++    position_only = descriptor_distance(first, second, weights={"normalized_xy": 1.0})
++    assert position_only > 0.05
++    assert descriptor_distance(first, first) == pytest.approx(0.0)
++    with pytest.raises(ValueError, match="unknown"):
++        descriptor_distance(first, second, weights={"unknown": 1.0})
++    with pytest.raises(ValueError, match="positive"):
++        descriptor_distance(first, second, weights={"normalized_xy": 0.0})
++    with pytest.raises(ValueError, match="nonnegative"):
++        descriptor_distance(first, second, weights={"normalized_xy": -1.0})
++    with pytest.raises(ValueError, match="matching sample_count"):
++        descriptor_distance(first, trajectory_descriptor(points, samples=32))
++
++    with pytest.raises(ValueError, match="shape"):
++        trajectory_descriptor(np.array([0.0, 1.0]))
++    with pytest.raises(ValueError, match="finite"):
++        trajectory_descriptor(np.array([[0.0, 0.0], [np.nan, 1.0]]))
++    with pytest.raises(ValueError, match="zero-length"):
++        trajectory_descriptor(np.ones((4, 2)))
++    with pytest.raises(ValueError, match="samples"):
++        trajectory_descriptor(points, samples=1)
++    with pytest.raises(ValueError, match="smoothing_window"):
++        trajectory_descriptor(points, smoothing_window=0)
++    with pytest.raises(ValueError, match="sample_count"):
++        TrajectoryDescriptor(1, np.zeros((1, 2)), np.zeros((1, 2)), np.zeros(1), 0.0, 0.0, 0.0)
++
++
++
++def test_descriptor_apis_are_exported_from_package_root():
++    import planarcurve
++
++    assert planarcurve.TrajectoryDescriptor is TrajectoryDescriptor
++    assert planarcurve.trajectory_descriptor is trajectory_descriptor
++    assert planarcurve.reverse_descriptor is reverse_descriptor
++    assert planarcurve.descriptor_distance is descriptor_distance
+diff --git a/tests/test_trajectory_family.py b/tests/test_trajectory_family.py
+new file mode 100644
+index 0000000..7b8d629
+--- /dev/null
++++ b/tests/test_trajectory_family.py
+@@ -0,0 +1,123 @@
++import numpy as np
++import pytest
++
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryVariationPolicy,
++    fit_trajectory_family,
++)
++from planarcurve.trajectory import (
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_trajectory,
++    trajectory_total_turn,
++)
++from planarcurve.transforms import Similarity2D
++
++
++def _arc(rate: float = 90.0) -> Trajectory2D:
++    return Trajectory2D(
++        length=1.0,
++        start_heading_deg=0.0,
++        heading_rate=HeadingRateProfile(rate, rate),
++    )
++
++
++def _occurrence(
++    trajectory: Trajectory2D,
++    *,
++    scale: float,
++    rotation: float,
++    dx: float,
++    dy: float,
++) -> np.ndarray:
++    points = evaluate_trajectory(trajectory, count=129).xy
++    return Similarity2D(scale, rotation, dx, dy).apply(points)
++
++
++def _options() -> TrajectoryFitOptions:
++    return TrajectoryFitOptions(change_count=0, samples=40, restarts=0, max_nfev=150)
++
++
++def test_shared_family_reports_transforms_and_occurrence_error_breakdown():
++    trajectory = _arc()
++    occurrences = [
++        _occurrence(trajectory, scale=0.5, rotation=-35.0, dx=2.0, dy=-1.0),
++        _occurrence(trajectory, scale=2.0, rotation=70.0, dx=-4.0, dy=3.0),
++        _occurrence(trajectory, scale=1.2, rotation=10.0, dx=0.0, dy=0.0),
++    ]
++    snapshots = [points.copy() for points in occurrences]
++
++    result = fit_trajectory_family(occurrences, fit_options=_options())
++
++    assert result.success
++    assert result.model.training_occurrences == len(occurrences)
++    assert result.model.change_count == 0
++    assert len(result.occurrences) == len(occurrences)
++    assert result.validation_cost is None
++    assert result.score == pytest.approx(result.training_cost + result.complexity_cost)
++    assert trajectory_total_turn(result.model.trajectory) > 60.0
++    assert all(item.accepted and item.optimizer_success for item in result.occurrences)
++    assert all(item.optimizer_evaluations > 0 for item in result.occurrences)
++    assert all(item.rate_deviation == (0.0, 0.0) for item in result.occurrences)
++    assert all(item.position_rmse < 0.01 for item in result.occurrences)
++    assert all(item.heading_rmse_deg < 2.0 for item in result.occurrences)
++    assert all(item.endpoint_error < 0.01 for item in result.occurrences)
++    assert all(item.turn_error_deg < 5.0 for item in result.occurrences)
++    assert all(item.robust_cost >= 0.0 for item in result.occurrences)
++    for points, snapshot in zip(occurrences, snapshots, strict=True):
++        np.testing.assert_array_equal(points, snapshot)
++
++
++def test_reversed_occurrence_is_not_silently_reoriented_and_is_diagnosed():
++    trajectory = _arc()
++    occurrences = [
++        _occurrence(trajectory, scale=scale, rotation=rotation, dx=dx, dy=dy)
++        for scale, rotation, dx, dy in (
++            (0.8, -20.0, 1.0, -2.0),
++            (1.0, 15.0, 0.0, 1.0),
++            (1.4, 90.0, -3.0, 0.5),
++            (0.6, -75.0, 2.0, 4.0),
++        )
++    ]
++    occurrences.append(occurrences[0][::-1].copy())
++
++    result = fit_trajectory_family(occurrences, fit_options=_options())
++
++    assert trajectory_total_turn(result.model.trajectory) > 45.0
++    assert all(item.accepted for item in result.occurrences[:-1])
++    assert not result.occurrences[-1].accepted
++    assert result.occurrences[-1].robust_cost > 3.0 * np.median(
++        [item.robust_cost for item in result.occurrences[:-1]]
++    )
++
++
++def test_family_requires_observations_and_rejects_zero_length_curves():
++    with pytest.raises(ValueError, match="at least one"):
++        fit_trajectory_family([], fit_options=_options())
++    with pytest.raises(ValueError, match="zero-length"):
++        fit_trajectory_family([np.ones((5, 2))], fit_options=_options())
++
++
++def test_family_variation_policy_does_not_allow_position_offsets_yet():
++    with pytest.raises(NotImplementedError, match="change-position"):
++        fit_trajectory_family(
++            [_occurrence(_arc(), scale=1.0, rotation=0.0, dx=0.0, dy=0.0)],
++            fit_options=_options(),
++            variation_policy=TrajectoryVariationPolicy(allow_change_position_offsets=True),
++        )
++
++
++
++def test_very_short_but_nonzero_observations_are_fit():
++    occurrences = [
++        np.array([[0.0, 0.0], [2.0, 0.0]]),
++        np.array([[3.0, -1.0], [3.0, 4.0]]),
++    ]
++
++    result = fit_trajectory_family(occurrences, fit_options=_options())
++
++    assert result.success
++    assert len(result.occurrences) == 2
++    assert all(item.accepted for item in result.occurrences)
++    assert all(item.position_rmse < 1e-6 for item in result.occurrences)
+diff --git a/tests/test_trajectory_family_variation.py b/tests/test_trajectory_family_variation.py
+new file mode 100644
+index 0000000..af573f4
+--- /dev/null
++++ b/tests/test_trajectory_family_variation.py
+@@ -0,0 +1,66 @@
++import numpy as np
++import pytest
++
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryVariationPolicy,
++    fit_trajectory_family,
++)
++from planarcurve.trajectory import HeadingRateProfile, Trajectory2D, evaluate_trajectory
++from planarcurve.transforms import Similarity2D
++
++
++def _curve(rate: float, *, scale: float, rotation: float, offset: float) -> np.ndarray:
++    trajectory = Trajectory2D(
++        length=1.0,
++        start_heading_deg=0.0,
++        heading_rate=HeadingRateProfile(rate, rate),
++    )
++    points = evaluate_trajectory(trajectory, count=129).xy
++    return Similarity2D(scale, rotation, offset, -offset / 2.0).apply(points)
++
++
++def _options() -> TrajectoryFitOptions:
++    return TrajectoryFitOptions(change_count=0, samples=40, restarts=0, max_nfev=150)
++
++
++def test_rate_variation_is_bounded_explicit_and_deterministic():
++    occurrences = [
++        _curve(85.0, scale=0.8, rotation=-30.0, offset=1.0),
++        _curve(90.0, scale=1.2, rotation=15.0, offset=-2.0),
++        _curve(95.0, scale=1.5, rotation=75.0, offset=3.0),
++    ]
++    policy = TrajectoryVariationPolicy(rate_sigma=12.0)
++
++    first = fit_trajectory_family(occurrences, fit_options=_options(), variation_policy=policy)
++    second = fit_trajectory_family(occurrences, fit_options=_options(), variation_policy=policy)
++
++    assert first.success and second.success
++    assert len(first.occurrences) == len(occurrences)
++    deviations = np.asarray([item.rate_deviation for item in first.occurrences])
++    assert deviations.shape == (len(occurrences), 2)
++    assert np.all(np.abs(deviations) <= policy.rate_sigma + 1e-10)
++    assert np.any(np.abs(deviations) > 0.1)
++    assert first.model.parameter_scale["rate_0"] > 0.0
++    assert first.model.parameter_scale["rate_1"] > 0.0
++    for first_item, second_item in zip(first.occurrences, second.occurrences, strict=True):
++        np.testing.assert_allclose(
++            first_item.rate_deviation, second_item.rate_deviation, atol=1e-10
++        )
++        assert first_item.robust_cost == pytest.approx(second_item.robust_cost)
++
++
++def test_variation_policy_validates_scales_and_keeps_positions_fixed():
++    with pytest.raises(ValueError, match="rate_sigma"):
++        TrajectoryVariationPolicy(rate_sigma=0.0)
++    with pytest.raises(ValueError, match="position_sigma"):
++        TrajectoryVariationPolicy(position_sigma=-1.0)
++
++    result = fit_trajectory_family(
++        [_curve(90.0, scale=1.0, rotation=0.0, offset=0.0)],
++        fit_options=_options(),
++        variation_policy=TrajectoryVariationPolicy(rate_sigma=10.0),
++    )
++    assert result.model.change_count == 0
++    assert result.model.trajectory.heading_rate.changes == ()
++    assert len(result.occurrences[0].rate_deviation) == 2
+diff --git a/tests/test_trajectory_model_selection.py b/tests/test_trajectory_model_selection.py
+new file mode 100644
+index 0000000..b05ede9
+--- /dev/null
++++ b/tests/test_trajectory_model_selection.py
+@@ -0,0 +1,126 @@
++import numpy as np
++
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryModelSelectionOptions,
++    select_shared_trajectory_model,
++)
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_trajectory,
++)
++from planarcurve.transforms import Similarity2D
++
++
++def _observations(trajectory: Trajectory2D, *, count: int = 4, noise: float = 0.0):
++    base = evaluate_trajectory(trajectory, count=81).xy
++    rng = np.random.default_rng(15)
++    return [
++        Similarity2D(
++            scale=0.6 + 0.3 * index,
++            rotation_deg=-35.0 + 25.0 * index,
++            dx=2.0 * index,
++            dy=-index,
++        ).apply(base)
++        + rng.normal(0.0, noise, base.shape)
++        for index in range(count)
++    ]
++
++
++def _fit_options() -> TrajectoryFitOptions:
++    return TrajectoryFitOptions(change_count=0, samples=24, restarts=0, max_nfev=100)
++
++
++def _selection_options(
++    change_counts: tuple[int, ...], *, validation_fraction: float = 0.0, seed: int = 0
++) -> TrajectoryModelSelectionOptions:
++    return TrajectoryModelSelectionOptions(
++        change_counts=change_counts,
++        validation_fraction=validation_fraction,
++        complexity_weight=0.01,
++        parameter_precision=1e-3,
++        seed=seed,
++    )
++
++
++def test_straight_and_noisy_families_prefer_zero_unnecessary_changes():
++    line = Trajectory2D(1.0, 0.0, HeadingRateProfile(0.0, 0.0))
++    options = _selection_options((0, 1, 2, 3, 4))
++    exact = select_shared_trajectory_model(
++        _observations(line), fit_options=_fit_options(), selection_options=options
++    )
++    noisy = select_shared_trajectory_model(
++        _observations(line, noise=0.004),
++        fit_options=_fit_options(),
++        selection_options=options,
++    )
++
++    assert exact.success and noisy.success
++    assert exact.model.change_count == 0
++    assert noisy.model.change_count < max(options.change_counts)
++
++
++def test_constant_turn_arc_does_not_grow_arbitrary_knots():
++    arc = Trajectory2D(1.0, 0.0, HeadingRateProfile(90.0, 90.0))
++    options = _selection_options((0, 1, 2, 3))
++    result = select_shared_trajectory_model(
++        _observations(arc), fit_options=_fit_options(), selection_options=options
++    )
++
++    assert result.success
++    assert result.model.change_count == 0
++
++
++def test_s_curve_selects_additional_profile_complexity():
++    s_curve = Trajectory2D(
++        1.0,
++        0.0,
++        HeadingRateProfile(
++            180.0,
++            180.0,
++            changes=(HeadingRateChange(0.5, -180.0),),
++        ),
++    )
++    options = _selection_options((0, 1, 2, 3))
++    result = select_shared_trajectory_model(
++        _observations(s_curve), fit_options=_fit_options(), selection_options=options
++    )
++
++    assert result.success
++    assert 0 < result.model.change_count < max(options.change_counts)
++
++
++def test_validation_split_and_selection_are_deterministic_and_decomposed():
++    line = Trajectory2D(1.0, 0.0, HeadingRateProfile(0.0, 0.0))
++    observations = _observations(line, count=5, noise=0.002)
++    options = _selection_options((0, 1), validation_fraction=0.2, seed=42)
++
++    first = select_shared_trajectory_model(
++        observations, fit_options=_fit_options(), selection_options=options
++    )
++    second = select_shared_trajectory_model(
++        observations, fit_options=_fit_options(), selection_options=options
++    )
++
++    assert first.model.training_occurrences == 4
++    assert first.validation_cost is not None and np.isfinite(first.validation_cost)
++    assert first.score == first.training_cost + first.complexity_cost + first.validation_cost
++    assert first.model.change_count == second.model.change_count
++    assert first.score == second.score
++
++
++def test_selection_options_reject_invalid_candidates_and_scales():
++    import pytest
++
++    with pytest.raises(ValueError, match="nonempty"):
++        TrajectoryModelSelectionOptions(change_counts=())
++    with pytest.raises(ValueError, match="unique"):
++        TrajectoryModelSelectionOptions(change_counts=(0, 0))
++    with pytest.raises(ValueError, match="validation_fraction"):
++        TrajectoryModelSelectionOptions(validation_fraction=1.0)
++    with pytest.raises(ValueError, match="complexity_weight"):
++        TrajectoryModelSelectionOptions(complexity_weight=-1.0)
++    with pytest.raises(ValueError, match="parameter_precision"):
++        TrajectoryModelSelectionOptions(parameter_precision=0.0)
