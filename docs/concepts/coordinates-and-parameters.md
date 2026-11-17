@@ -46,7 +46,11 @@ For example, doubling `length` while keeping the same profile halves the curvatu
 `apply()` transforms points. `apply_vectors()` applies only the linear component, without translation. Composition is ordered as function composition:
 
 ```python
-a.compose(b)  # a ∘ b: apply b first, then a
+from planarcurve.transforms import Affine2D
+
+move = Affine2D.translation_only(3.0, 0.0)
+scale = Affine2D.scale(2.0)
+placed = move.compose(scale).apply([1.0, 0.0])  # [5.0, 0.0]
 ```
 
 A singular affine map can transform points but has no inverse. `Similarity2D` is restricted to positive uniform scale, rotation in degrees, and translation.

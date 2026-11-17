@@ -77,7 +77,6 @@ Here `u` is normalized progress in `[0, 1]`. Heading rates are degrees per unit 
 `TrajectoryChain` composes generic `Trajectory2D` segments in either direction. Reversal uses the heading-rate profile, and chain samples preserve segment boundaries, tangent changes, and cumulative arc length. `trajectory_chain_to_cubic_path()` provides a connected cubic representation. These primitives contain no application-specific movement semantics.
 
 ## Fitting
-## Fitting
 
 Fitting requires SciPy. Spline fitting estimates shared control points with weighted sparse least squares and IRLS. Trajectory fitting uses a normalized length-1, zero-heading profile plus a similarity transform for each occurrence. See the [fitting guide](https://planarcurve.readthedocs.io/en/latest/guides/fitting.html) for residual units, endpoint policies, options, and metrics.
 ## Supported spline geometry
@@ -109,9 +108,11 @@ python examples/spline_to_bezier.py
 python examples/svg_pipeline.py
 python examples/fit_polyline_to_spline.py
 python examples/fit_shared_trajectory.py
+python examples/fit_shared_trajectory_family.py
+python examples/select_trajectory_complexity.py
 ```
 
-See the [examples guide](https://planarcurve.readthedocs.io/en/latest/examples.html) for all six scripts, their optional dependencies, and generated output.
+See the [examples guide](https://planarcurve.readthedocs.io/en/latest/examples.html) for what each script demonstrates, its optional dependencies, and its output.
 
 ## API stability and provenance
 

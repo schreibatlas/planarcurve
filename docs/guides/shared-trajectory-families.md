@@ -1,30 +1,28 @@
 # Shared trajectory families
 
-PlanarCurve can describe and fit reusable directed geometric trajectory families. It learns and compares geometric trajectory families. It does not attach semantic meaning to them.
-
-The data flow is:
-
-```text
-ordered points
-    ↓
-directed normalized descriptor
-    ↓
-Trajectory2D candidate
-    ↓
-TrajectoryFamilyModel
-```
+Use directed descriptors to compare ordered point sequences. To fit a shared trajectory family, pass the ordered point sequences directly to `fit_trajectory_family`. The examples below use three observations of the same arc at different scales and placements.
 
 ## Directed descriptors
 
-`planarcurve.trajectory_descriptor(points, *, samples=64, smoothing_window=5)` resamples an ordered polyline by chord length, translates its first sample to the origin, divides by arc length, and rotates its starting tangent to +x. It never reverses the points. `normalized_xy`, `tangent_xy`, and `heading_rate` are read-only arrays with `samples` rows. Heading rate is measured in degrees per normalized arc-length unit.
+`planarcurve.trajectory_descriptor(points, *, samples=64, smoothing_window=5)` resamples an ordered polyline by chord length, translates its first sample to the origin, and rotates its starting tangent to +x. It scales the coordinates by dividing by the sum of chord lengths between consecutive samples. That sum can be smaller than the original polyline length when a resampled chord cuts across a corner. It never reverses the points. `normalized_xy`, `tangent_xy`, and `heading_rate` are read-only arrays with `samples` rows. Heading rate is measured in degrees per normalized arc-length unit.
 
-The scalar descriptor fields include signed total turn, endpoint displacement divided by arc length, and signed turn energy. Turn energy is the sum of each sampled heading increment times its absolute value, in square degrees. Use `reverse_descriptor` to request the opposite traversal explicitly. `descriptor_distance` compares equal-sized descriptors with a dimensionless weighted RMS; its optional weight mapping accepts descriptor field names and defaults to equal weights.
+The scalar descriptor fields include signed total turn, endpoint displacement divided by the sum of resampled chord lengths, and signed turn energy. Turn energy is the sum of each sampled heading increment times its absolute value, in square degrees. Use `reverse_descriptor` to request the opposite traversal explicitly. `descriptor_distance` compares equal-sized descriptors with a dimensionless weighted RMS. Its optional weight mapping accepts descriptor field names and defaults to equal weights when omitted.
 
 ```python
 from planarcurve import descriptor_distance, trajectory_descriptor
+from planarcurve.trajectory import HeadingRateProfile, Trajectory2D
+from planarcurve.transforms import Similarity2D
 
-first = trajectory_descriptor(points_a)
-second = trajectory_descriptor(points_b)
+profile = HeadingRateProfile(90.0, 90.0)
+arc = Trajectory2D(length=1.0, start_heading_deg=0.0, heading_rate=profile)
+base = arc.evaluate(count=65).xy
+occurrences = [
+    base,
+    Similarity2D(0.6, -35.0, 2.0, -1.0).apply(base),
+    Similarity2D(1.5, 20.0, -3.0, 2.5).apply(base),
+]
+first = trajectory_descriptor(occurrences[0])
+second = trajectory_descriptor(occurrences[1])
 print(descriptor_distance(first, second))
 ```
 
@@ -56,17 +54,15 @@ The codec validates ordered interior positions, configured spacing, finite value
 ```python
 from planarcurve.fitting import TrajectoryFitOptions, fit_trajectory_family
 
-result = fit_trajectory_family(
-    occurrences,
-    fit_options=TrajectoryFitOptions(change_count=2),
-)
+fit_options = TrajectoryFitOptions(change_count=0, samples=32, restarts=0, max_nfev=150)
+result = fit_trajectory_family(occurrences, fit_options=fit_options)
 model = result.model
 print(model.change_count, result.score)
 for occurrence in result.occurrences:
     print(occurrence.transform, occurrence.position_rmse, occurrence.heading_rmse_deg)
 ```
 
-`TrajectoryFamilyModel.parameter_scale` reports population standard deviations of the fitted rate offsets, in degrees per normalized progress unit. These are dispersion statistics, not confidence probabilities. Per-occurrence position RMSE and endpoint error are normalized by that observation's arc length. Heading and turn errors are in degrees. The robust cost uses the configured fit residual weights and robust scale. `accepted` flags fits whose robust cost exceeds the threshold `median + max(3 × 1.4826 × MAD, 5% of max(median, 1e-8))`, where MAD is the median absolute deviation. Optimizer convergence and evaluation count are explicit fields.
+`TrajectoryFamilyModel.parameter_scale` reports population standard deviations of the fitted rate offsets, in degrees per normalized progress unit. These are dispersion statistics, not confidence probabilities. Per-occurrence position RMSE and endpoint error are normalized by that observation's arc length. Heading and turn errors are in degrees. The robust cost uses the configured fit residual weights and robust scale. `accepted` is `True` when the occurrence's robust cost is at or below `median + max(3 × 1.4826 × MAD, 5% of max(median, 1e-8))`. The median and median absolute deviation (MAD) are computed across the occurrence costs. Optimizer convergence and evaluation count are explicit fields.
 
 ### Bounded occurrence variation
 
