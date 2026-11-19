@@ -11,6 +11,13 @@ from .model_selection import (
 )
 from .parameters import HeadingRateParameterization
 from .policy import SplineEndpointPolicy
+from .spline import (
+    PolylineSplineCandidateScore,
+    PolylineSplineFitDiagnostics,
+    PolylineSplineFitOptions,
+    PolylineSplineFitResult,
+    fit_polyline_spline,
+)
 from .trajectory import (
     SharedTrajectoryFitResult,
     TrajectoryFitOptions,
@@ -21,6 +28,10 @@ from .trajectory import (
 
 __all__ = [
     "HeadingRateParameterization",
+    "PolylineSplineCandidateScore",
+    "PolylineSplineFitDiagnostics",
+    "PolylineSplineFitOptions",
+    "PolylineSplineFitResult",
     "SharedTrajectoryFitResult",
     "SplineEndpointPolicy",
     "TrajectoryFamilyFitResult",
@@ -30,6 +41,7 @@ __all__ = [
     "TrajectoryModelSelectionOptions",
     "TrajectoryOccurrenceFit",
     "TrajectoryVariationPolicy",
+    "fit_polyline_spline",
     "fit_shared_trajectory_profile",
     "fit_trajectory",
     "fit_trajectory_family",

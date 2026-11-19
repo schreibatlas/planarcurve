@@ -7,6 +7,7 @@ from planarcurve.fitting.spline import SplineEndpointPolicy
 from planarcurve.spline import (
     BSplineCurve,
     bspline_from_geometry,
+    clamped_uniform_bspline_basis,
     control_roughness_matrix,
     evaluate_bspline,
     sample_curve_by_arclength,
@@ -168,3 +169,26 @@ def test_spline_endpoint_policy_defaults_to_free_endpoints():
     policy = SplineEndpointPolicy()
 
     assert (policy.start, policy.end) == ("free", "free")
+
+
+def test_clamped_uniform_bspline_basis_seeds_by_arclength_and_preserves_endpoints():
+    points = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 2.0], [4.0, 2.0]])
+    basis = clamped_uniform_bspline_basis(6, points)
+
+    assert basis.degree == 3
+    assert basis.knots == pytest.approx((0.0,) * 4 + (1.0 / 3.0, 2.0 / 3.0) + (1.0,) * 4)
+    np.testing.assert_allclose(
+        basis.control_points,
+        [[0.0, 0.0], [1.0, 0.2], [1.0, 1.4], [1.6, 2.0], [2.8, 2.0], [4.0, 2.0]],
+    )
+    assert basis.control_points[0] == (0.0, 0.0)
+    assert basis.control_points[-1] == (4.0, 2.0)
+
+
+def test_clamped_uniform_bspline_basis_rejects_invalid_inputs():
+    with pytest.raises(ValueError, match="control_count"):
+        clamped_uniform_bspline_basis(3, [[0.0, 0.0], [1.0, 0.0]])
+    with pytest.raises(ValueError, match="at least two points"):
+        clamped_uniform_bspline_basis(4, [[0.0, 0.0]])
+    with pytest.raises(ValueError, match="distinct points"):
+        clamped_uniform_bspline_basis(4, [[0.0, 0.0], [0.0, 0.0]])

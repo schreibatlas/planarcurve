@@ -123,6 +123,47 @@ def validate_bspline_geometry(geometry: BSplineCurve) -> None:
         raise ValueError("cubic B-spline interior knots must be simple and inside (0, 1)")
 
 
+def clamped_uniform_bspline_basis(
+    control_count: int,
+    seed_points: ArrayLike,
+) -> BSplineCurve:
+    """Construct a clamped cubic basis seeded uniformly along a polyline.
+
+    The interior knots are uniformly spaced in normalized parameter space.
+    Control points are sampled by normalized arc length, with the first and
+    last controls fixed to the first and last input observations.
+    """
+    control_count = _require_integer(control_count, name="control_count", minimum=4)
+    points = np.asarray(seed_points, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 2 or not np.isfinite(points).all():
+        raise ValueError("seed_points must be a finite array with shape (n, 2)")
+
+    if len(points) < 2:
+        raise ValueError("seed_points must contain at least two points")
+
+    keep = np.concatenate(([True], np.any(np.diff(points, axis=0) != 0.0, axis=1)))
+    points = points[keep]
+    if len(points) < 2:
+        raise ValueError("seed_points must contain at least two distinct points")
+
+    segment_lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    cumulative = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    if not np.isfinite(cumulative).all() or cumulative[-1] <= 0.0:
+        raise ValueError("seed_points must have finite, nonzero arc length")
+    parameters = cumulative / cumulative[-1]
+    control_parameters = np.linspace(0.0, 1.0, control_count)
+    control_points = np.column_stack(
+        [np.interp(control_parameters, parameters, points[:, axis]) for axis in range(2)]
+    )
+    control_points[0] = points[0]
+    control_points[-1] = points[-1]
+
+    interior_count = control_count - 4
+    interior_knots = np.arange(1, interior_count + 1, dtype=float) / (interior_count + 1)
+    knots = np.concatenate((np.zeros(4), interior_knots, np.ones(4)))
+    return BSplineCurve(knots=knots, control_points=control_points, degree=3)
+
+
 def bspline_from_geometry(geometry: BSplineCurve) -> tuple[BSpline, BSpline]:
     """Create SciPy spline objects for the x and y coordinates."""
     validate_bspline_geometry(geometry)

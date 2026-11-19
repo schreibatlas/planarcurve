@@ -8,6 +8,7 @@ python examples/bezier_basics.py
 python examples/spline_to_bezier.py
 python examples/svg_pipeline.py
 python examples/fit_polyline_to_spline.py
+python examples/fit_regularized_polyline.py
 python examples/fit_shared_trajectory.py
 python examples/fit_shared_trajectory_family.py
 python examples/select_trajectory_complexity.py
@@ -20,6 +21,7 @@ python examples/select_trajectory_complexity.py
 | [Spline conversion](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py) | B-spline sampling and conversion to `CubicPath` | SciPy | Console |
 | [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py) | Parsing, transforming, and resampling one SVG subpath | FontTools | Console |
 | [Spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) | Robust shared control-point fitting | SciPy | `fit_polyline_to_spline.svg` |
+| [Regularized polyline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_regularized_polyline.py) | Scale-stable model selection and analytic heading, curvature, and progress turn rate | SciPy | Console |
 | [Shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) | One normalized shape fitted to multiple occurrences | SciPy | `fit_shared_trajectory.svg` |
 | [Shared trajectory family fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and per-occurrence family diagnostics | SciPy | Console |
 | [Trajectory complexity selection](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py) | Deterministic model-order selection and decomposed costs | SciPy | Console |

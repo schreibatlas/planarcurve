@@ -1,6 +1,44 @@
 # Fitting
 
-Fitting is optional and requires SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. The package provides two separate workflows: fitting shared B-spline control points, and fitting a normalized heading-rate trajectory with occurrence placement transforms.
+Fitting is optional and requires SciPy. Install it with `python -m pip install 'planarcurve[fit]'`. The package provides high-level polyline reconstruction, low-level shared B-spline control-point fitting, and normalized heading-rate trajectory fitting with occurrence placement transforms.
+
+## Reconstruct a polyline as a regularized spline
+
+`fit_polyline_spline()` accepts ordered 2D samples and optional nonnegative per-sample weights. It removes consecutive duplicate points, parameterizes observations by normalized cumulative chord length, normalizes coordinates by total polyline length, and tries clamped cubic bases seeded along the polyline. It returns an ordinary `BSplineCurve`, so the existing analytic tangent and curvature evaluation remains authoritative.
+
+```python
+import numpy as np
+
+from planarcurve.fitting import (
+    PolylineSplineFitOptions,
+    fit_polyline_spline,
+)
+
+# `points` are ordered noisy samples and `weights` align with those samples.
+fit = fit_polyline_spline(
+    points,
+    weights=weights,
+    options=PolylineSplineFitOptions(
+        min_control_points=4,
+        max_control_points=16,
+        target_rms_error_fraction=0.002,
+        target_p95_error_fraction=0.004,
+    ),
+)
+samples = fit.curve.sample_by_arclength(101)
+assert samples.tangent is not None
+assert samples.curvature is not None
+heading = np.arctan2(samples.tangent[:, 1], samples.tangent[:, 0])
+curvature = samples.curvature
+# For normalized arc-length progress q, d(theta)/dq = curvature * total_length.
+dtheta_dq = curvature * fit.diagnostics.normalized_scale
+```
+
+Residual diagnostics are normalized by `normalized_scale`, the original polyline's total arc length. Multiply a residual metric by this scale to express it in input coordinate units. The geometric acceptance gate uses unweighted residuals; `weighted_residual_rms` is reported separately when weights are supplied. Zero weights remove samples from the data term, and the endpoint observations remain part of the polyline parameterization and basis seed.
+
+Candidates are considered in increasing control count. The smallest model meeting both RMS and 95th-percentile targets is selected. If none meets both, the minimum score is used: RMS divided by its target plus p95 divided by its target, plus `complexity_weight * control_count / max_control_points`, plus `roughness_weight * normalized_control_roughness`. The result diagnostics expose each candidate's metrics and score, and `met_target_error` reports whether the selected model passed both targets.
+
+The generic endpoint policy is anchored. Pass `SplineEndpointPolicy(start="locked", end="locked")` when both graph-node estimates must remain fixed, or choose `free` or `anchored` independently. The [regularized polyline example](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_regularized_polyline.py) fits noisy samples of a known cubic curve and reports analytic heading, curvature, and turn rate by normalized progress.
 
 ## Stable trajectory fitting imports
 

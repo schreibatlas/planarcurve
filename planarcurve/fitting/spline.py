@@ -14,7 +14,13 @@ except ImportError as exc:  # pragma: no cover - optional fitting extra
         "planarcurve.fitting.spline requires SciPy; install planarcurve[fit]"
     ) from exc
 
-from ..spline import BSplineCurve, control_roughness_matrix, spline_design_matrix
+from ..polyline import normalized_arclength
+from ..spline import (
+    BSplineCurve,
+    clamped_uniform_bspline_basis,
+    control_roughness_matrix,
+    spline_design_matrix,
+)
 from ..types import _require_integer
 from .policy import SplineEndpointPolicy
 
@@ -244,3 +250,288 @@ def fit_spline_control_points(
         residual_rms=float(np.sqrt(np.mean(residuals**2))),
         iterations=options.irls_iterations,
     )
+
+
+@dataclass(frozen=True)
+class PolylineSplineFitOptions:
+    """Scale-normalized policy for fitting an ordered polyline with a B-spline.
+
+    Residual targets are fractions of total input arc length. If no candidate
+    meets both targets, selection minimizes the sum of RMS and p95 residuals
+    divided by their targets, plus ``complexity_weight * control_count / max``
+    and ``roughness_weight * normalized_control_roughness``.
+    """
+
+    min_control_points: int = 4
+    max_control_points: int = 16
+    target_rms_error_fraction: float = 0.002
+    target_p95_error_fraction: float = 0.004
+    smoothness: float = 0.02
+    robust_scale: float = 1.5
+    irls_iterations: int = 4
+    endpoint_policy: SplineEndpointPolicy = field(
+        default_factory=lambda: SplineEndpointPolicy(start="anchored", end="anchored")
+    )
+    endpoint_sigma: float = 1.0
+    candidate_control_counts: tuple[int, ...] | None = None
+    complexity_weight: float = 0.05
+    roughness_weight: float = 0.1
+
+    def __post_init__(self) -> None:
+        minimum = _require_integer(self.min_control_points, name="min_control_points", minimum=4)
+        maximum = _require_integer(self.max_control_points, name="max_control_points", minimum=4)
+        if maximum < minimum:
+            raise ValueError("max_control_points must be at least min_control_points")
+        object.__setattr__(self, "min_control_points", minimum)
+        object.__setattr__(self, "max_control_points", maximum)
+
+        values = (
+            self.target_rms_error_fraction,
+            self.target_p95_error_fraction,
+            self.smoothness,
+            self.robust_scale,
+            self.endpoint_sigma,
+            self.complexity_weight,
+            self.roughness_weight,
+        )
+        if not np.isfinite(values).all():
+            raise ValueError("polyline spline fit options must be finite")
+        if self.target_rms_error_fraction <= 0.0 or self.target_p95_error_fraction <= 0.0:
+            raise ValueError("residual target fractions must be positive")
+        if self.smoothness < 0.0 or self.complexity_weight < 0.0 or self.roughness_weight < 0.0:
+            raise ValueError("smoothness and score weights must be nonnegative")
+        if self.robust_scale <= 0.0 or self.endpoint_sigma <= 0.0:
+            raise ValueError("robust scale and endpoint sigma must be positive")
+        object.__setattr__(
+            self,
+            "irls_iterations",
+            _require_integer(self.irls_iterations, name="irls_iterations", minimum=1),
+        )
+        if not isinstance(self.endpoint_policy, SplineEndpointPolicy):
+            raise ValueError("endpoint_policy must be a SplineEndpointPolicy")
+
+        if self.candidate_control_counts is not None:
+            counts = tuple(
+                _require_integer(value, name="candidate_control_counts", minimum=4)
+                for value in self.candidate_control_counts
+            )
+            if not counts:
+                raise ValueError("candidate_control_counts must not be empty")
+            if len(set(counts)) != len(counts):
+                raise ValueError("candidate_control_counts must be unique")
+            if any(value < minimum or value > maximum for value in counts):
+                raise ValueError(
+                    "candidate_control_counts must lie within configured control bounds"
+                )
+            object.__setattr__(self, "candidate_control_counts", tuple(sorted(counts)))
+
+
+@dataclass(frozen=True)
+class PolylineSplineCandidateScore:
+    """Normalized metrics and selection score for one control-count candidate."""
+
+    control_count: int
+    residual_rms: float
+    residual_median: float
+    residual_p95: float
+    residual_max: float
+    roughness: float
+    score: float
+    met_target_error: bool
+    weighted_residual_rms: float | None
+
+
+@dataclass(frozen=True)
+class PolylineSplineFitDiagnostics:
+    """Selected-model metrics and metrics for all attempted candidates.
+
+    Residual metrics are normalized by ``normalized_scale``, the input
+    polyline's total arc length. Weighted RMS is ``None`` when no weights
+    were supplied.
+    """
+
+    control_count: int
+    residual_rms: float
+    residual_median: float
+    residual_p95: float
+    residual_max: float
+    normalized_scale: float
+    met_target_error: bool
+    candidate_scores: tuple[PolylineSplineCandidateScore, ...]
+    weighted_residual_rms: float | None
+
+
+@dataclass(frozen=True)
+class PolylineSplineFitResult:
+    """A fitted ordinary B-spline and its model-selection diagnostics."""
+
+    curve: BSplineCurve
+    diagnostics: PolylineSplineFitDiagnostics
+
+
+def _polyline_spline_control_counts(options: PolylineSplineFitOptions) -> tuple[int, ...]:
+    if options.candidate_control_counts is not None:
+        return options.candidate_control_counts
+    span = options.max_control_points - options.min_control_points
+    if span <= 12:
+        return tuple(range(options.min_control_points, options.max_control_points + 1))
+    sampled = np.linspace(options.min_control_points, options.max_control_points, num=9)
+    return tuple(sorted({int(value) for value in np.rint(sampled)}))
+
+
+def _candidate_residuals(
+    basis: BSplineCurve,
+    parameters: np.ndarray,
+    observations: np.ndarray,
+    weights: np.ndarray | None,
+    *,
+    control_count: int,
+    options: PolylineSplineFitOptions,
+) -> tuple[PolylineSplineCandidateScore, np.ndarray]:
+    fit_options = SplineFitOptions(
+        smoothness=options.smoothness,
+        robust_scale=options.robust_scale,
+        irls_iterations=options.irls_iterations,
+        endpoint_policy=options.endpoint_policy,
+        endpoint_sigma=options.endpoint_sigma,
+    )
+    fit = fit_spline_control_points(
+        basis,
+        [SplineObservation(u=parameters, xy=observations, weight=weights)],
+        options=fit_options,
+    )
+    controls = np.asarray(fit.curve.control_points)
+    predicted = spline_design_matrix(parameters, basis) @ controls
+    residuals = np.linalg.norm(predicted - observations, axis=1)
+    residual_rms = float(np.sqrt(np.mean(residuals**2)))
+    residual_median = float(np.median(residuals))
+    residual_p95 = float(np.percentile(residuals, 95))
+    residual_max = float(np.max(residuals))
+    second_differences = np.diff(controls, n=2, axis=0)
+    roughness = float(np.sqrt(np.mean(np.sum(second_differences**2, axis=1))))
+    weighted_rms = (
+        None if weights is None else float(np.sqrt(np.average(residuals**2, weights=weights)))
+    )
+    met_target_error = (
+        residual_rms <= options.target_rms_error_fraction
+        and residual_p95 <= options.target_p95_error_fraction
+    )
+    score = (
+        residual_rms / options.target_rms_error_fraction
+        + residual_p95 / options.target_p95_error_fraction
+        + options.complexity_weight * control_count / options.max_control_points
+        + options.roughness_weight * roughness
+    )
+    return (
+        PolylineSplineCandidateScore(
+            control_count=control_count,
+            residual_rms=residual_rms,
+            residual_median=residual_median,
+            residual_p95=residual_p95,
+            residual_max=residual_max,
+            roughness=roughness,
+            score=float(score),
+            met_target_error=met_target_error,
+            weighted_residual_rms=weighted_rms,
+        ),
+        controls,
+    )
+
+
+def fit_polyline_spline(
+    points: ArrayLike,
+    *,
+    weights: ArrayLike | None = None,
+    options: PolylineSplineFitOptions | None = None,
+) -> PolylineSplineFitResult:
+    """Reconstruct an ordered noisy polyline as a scale-normalized cubic spline.
+
+    Consecutive duplicate points are removed before normalized cumulative
+    arc-length parameterization. Optional weights align with the original
+    observations and are filtered in the same way. Residual diagnostics and
+    model-selection targets are fractions of the total input arc length; the
+    returned curve is transformed back to the input coordinate frame.
+    """
+    if options is None:
+        options = PolylineSplineFitOptions()
+    if not isinstance(options, PolylineSplineFitOptions):
+        raise ValueError("options must be a PolylineSplineFitOptions")
+
+    original_points = np.asarray(points, dtype=float)
+    if (
+        original_points.ndim != 2
+        or original_points.shape[1] != 2
+        or not np.isfinite(original_points).all()
+    ):
+        raise ValueError("points must be a finite array with shape (n, 2)")
+    if len(original_points) < 2:
+        raise ValueError("at least two points are required")
+
+    input_weights = None
+    if weights is not None:
+        input_weights = np.asarray(weights, dtype=float)
+        if input_weights.shape != (len(original_points),):
+            raise ValueError("weights must have one value per input point")
+        if not np.isfinite(input_weights).all() or np.any(input_weights < 0.0):
+            raise ValueError("weights must be finite and nonnegative")
+
+    keep = np.concatenate(([True], np.any(np.diff(original_points, axis=0) != 0.0, axis=1)))
+    if not keep[-1]:
+        keep[-1] = True
+        trailing_run_start = np.flatnonzero(keep[:-1])[-1]
+        if trailing_run_start:
+            keep[trailing_run_start] = False
+    points_array = original_points[keep]
+    if len(points_array) < 2 or not np.any(np.diff(points_array, axis=0) != 0.0):
+        raise ValueError("polyline must contain at least two distinct points")
+    if input_weights is not None:
+        input_weights = input_weights[keep]
+        if not np.any(input_weights > 0.0):
+            raise ValueError("weights must have positive total weight")
+
+    parameters = normalized_arclength(points_array)
+    total_length = float(np.linalg.norm(np.diff(points_array, axis=0), axis=1).sum())
+    if not np.isfinite(total_length) or total_length <= 0.0:
+        raise ValueError("polyline must have finite, nonzero total arc length")
+    origin = points_array[0]
+    normalized_points = (points_array - origin) / total_length
+
+    candidates = []
+    for control_count in _polyline_spline_control_counts(options):
+        basis = clamped_uniform_bspline_basis(control_count, normalized_points)
+        summary, controls = _candidate_residuals(
+            basis,
+            parameters,
+            normalized_points,
+            input_weights,
+            control_count=control_count,
+            options=options,
+        )
+        candidates.append((summary, basis, controls))
+
+    satisfactory = [candidate for candidate in candidates if candidate[0].met_target_error]
+    if satisfactory:
+        selected = min(satisfactory, key=lambda candidate: candidate[0].control_count)
+    else:
+        selected = min(
+            candidates,
+            key=lambda candidate: (candidate[0].score, candidate[0].control_count),
+        )
+    summary, basis, normalized_controls = selected
+    curve = BSplineCurve(
+        knots=basis.knots,
+        control_points=normalized_controls * total_length + origin,
+        degree=basis.degree,
+    )
+    diagnostics = PolylineSplineFitDiagnostics(
+        control_count=summary.control_count,
+        residual_rms=summary.residual_rms,
+        residual_median=summary.residual_median,
+        residual_p95=summary.residual_p95,
+        residual_max=summary.residual_max,
+        normalized_scale=total_length,
+        met_target_error=summary.met_target_error,
+        candidate_scores=tuple(candidate[0] for candidate in candidates),
+        weighted_residual_rms=summary.weighted_residual_rms,
+    )
+    return PolylineSplineFitResult(curve=curve, diagnostics=diagnostics)
