@@ -14,16 +14,16 @@ python examples/fit_shared_trajectory_family.py
 python examples/select_trajectory_complexity.py
 ```
 
-| Example | Demonstrates | Optional dependency | Output |
-| --- | --- | --- | --- |
-| [Trajectory gallery](https://github.com/schreibatlas/planarcurve/blob/main/examples/trajectory_gallery.py) | Heading-rate profiles and theoretical arc length | None | `trajectory_gallery.svg` |
-| [Bezier basics](https://github.com/schreibatlas/planarcurve/blob/main/examples/bezier_basics.py) | Evaluation, tangent, curvature, subdivision, flattening, and length | None | Console |
-| [Spline conversion](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py) | B-spline sampling and conversion to `CubicPath` | SciPy | Console |
-| [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py) | Parsing, transforming, and resampling one SVG subpath | FontTools | Console |
-| [Spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py) | Robust shared control-point fitting | SciPy | `fit_polyline_to_spline.svg` |
-| [Regularized polyline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_regularized_polyline.py) | Scale-stable model selection and analytic heading, curvature, and progress turn rate | SciPy | Console |
-| [Shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) | One normalized shape fitted to multiple occurrences | SciPy | `fit_shared_trajectory.svg` |
-| [Shared trajectory family fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and per-occurrence family diagnostics | SciPy | Console |
-| [Trajectory complexity selection](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py) | Deterministic model-order selection and decomposed costs | SciPy | Console |
+| Example                                                                                                                            | Demonstrates                                                                         | Optional dependency | Output                       |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------- | ---------------------------- |
+| [Trajectory gallery](https://github.com/schreibatlas/planarcurve/blob/main/examples/trajectory_gallery.py)                         | Heading-rate profiles and theoretical arc length                                     | None                | `trajectory_gallery.svg`     |
+| [Bezier basics](https://github.com/schreibatlas/planarcurve/blob/main/examples/bezier_basics.py)                                   | Evaluation, tangent, curvature, subdivision, flattening, and length                  | None                | Console                      |
+| [Spline conversion](https://github.com/schreibatlas/planarcurve/blob/main/examples/spline_to_bezier.py)                            | B-spline sampling and conversion to `CubicPath`                                      | SciPy               | Console                      |
+| [SVG pipeline](https://github.com/schreibatlas/planarcurve/blob/main/examples/svg_pipeline.py)                                     | Parsing, transforming, and resampling one SVG subpath                                | FontTools           | Console                      |
+| [Spline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_polyline_to_spline.py)                         | Robust shared control-point fitting                                                  | SciPy               | `fit_polyline_to_spline.svg` |
+| [Regularized polyline fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_regularized_polyline.py)         | Scale-stable model selection and analytic heading, curvature, and progress turn rate | SciPy               | Console                      |
+| [Shared trajectory fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py)               | One normalized shape fitted to multiple occurrences                                  | SciPy               | `fit_shared_trajectory.svg`  |
+| [Shared trajectory family fitting](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and per-occurrence family diagnostics                           | SciPy               | Console                      |
+| [Trajectory complexity selection](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py)  | Deterministic model-order selection and decomposed costs                             | SciPy               | Console                      |
 
 Assertions in the scripts check the numerical behavior each example demonstrates. SVG outputs are written to the current working directory.

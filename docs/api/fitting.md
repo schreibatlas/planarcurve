@@ -55,7 +55,6 @@ The existing `CurveEvaluation` supplies analytic unit tangents and signed curvat
 :member-order: bysource
 ```
 
-
 ## Shared trajectory family fitting
 
 ```{automodule} planarcurve.fitting.family

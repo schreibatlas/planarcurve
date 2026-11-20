@@ -2,13 +2,13 @@
 
 `planarcurve` requires Python 3.10 or newer. The core geometry package depends on NumPy. Install an extra only when using its integration:
 
-| Capability | Install | Dependency |
-| --- | --- | --- |
-| Core trajectories, transforms, polylines, and Beziers | `python -m pip install planarcurve` | NumPy |
-| B-splines | `python -m pip install 'planarcurve[spline]'` | SciPy |
-| Fitting | `python -m pip install 'planarcurve[fit]'` | SciPy |
-| SVG adapters | `python -m pip install 'planarcurve[svg]'` | FontTools |
-| Everything | `python -m pip install 'planarcurve[all]'` | SciPy and FontTools |
+| Capability                                            | Install                                       | Dependency          |
+| ----------------------------------------------------- | --------------------------------------------- | ------------------- |
+| Core trajectories, transforms, polylines, and Beziers | `python -m pip install planarcurve`           | NumPy               |
+| B-splines                                             | `python -m pip install 'planarcurve[spline]'` | SciPy               |
+| Fitting                                               | `python -m pip install 'planarcurve[fit]'`    | SciPy               |
+| SVG adapters                                          | `python -m pip install 'planarcurve[svg]'`    | FontTools           |
+| Everything                                            | `python -m pip install 'planarcurve[all]'`    | SciPy and FontTools |
 
 For development, install the package and its test/lint tools in editable mode:
 

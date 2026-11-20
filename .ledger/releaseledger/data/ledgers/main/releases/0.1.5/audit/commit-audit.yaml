@@ -1,0 +1,43 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.1.5
+git_base_ref: v0.1.4
+git_base_sha: 4ae91abaa8c8eeb666337cb4cd66fb79d726d2a4
+git_head_ref: HEAD
+git_head_sha: 467241678c69c75358381600c086a34b4def6d78
+git_range: 4ae91abaa8c8eeb666337cb4cd66fb79d726d2a4..467241678c69c75358381600c086a34b4def6d78
+commit_count: 1
+rows:
+- sha: 467241678c69c75358381600c086a34b4def6d78
+  source_ref: git:467241678c69c75358381600c086a34b4def6d78
+  short_sha: '4672416'
+  changed_paths:
+  - docs/guides/shared-trajectory-families.md
+  - examples/select_single_trajectory_complexity.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/model_selection.py
+  - tests/test_trajectory_single_model_selection.py
+  stats:
+    files_changed: 5
+    insertions: 421
+    deletions: 1
+  inspected: true
+  inspected_paths:
+  - docs/guides/shared-trajectory-families.md
+  - examples/select_single_trajectory_complexity.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/model_selection.py
+  - tests/test_trajectory_single_model_selection.py
+  observed_behavior: Added public single-trajectory model selection that fits requested
+    heading-rate complexities, selects using fit cost plus a complexity penalty, and
+    returns candidate diagnostics with a normalized trajectory and placement transform.
+    Added public exports, guide, example, and tests.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: select single trajecctory'
+  target_entry_id: entry-0001
+  notes: ''

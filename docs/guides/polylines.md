@@ -49,13 +49,13 @@ one_nearest = closest_point_on_polyline((2.5, 0.7), line)
 
 `PolylineProjection` contains one result per query:
 
-| Field | Meaning | Shape |
-| --- | --- | --- |
-| `point` | Nearest projected point | `(M, 2)` |
-| `distance` | Euclidean distance to that point | `(M,)` |
-| `segment_index` | Index of the winning segment in the original polyline | `(M,)` |
-| `segment_t` | Clamped local parameter on the winning segment, from 0 to 1 | `(M,)` |
-| `arc_length` | Distance from the polyline start to the projected point | `(M,)` |
+| Field           | Meaning                                                     | Shape    |
+| --------------- | ----------------------------------------------------------- | -------- |
+| `point`         | Nearest projected point                                     | `(M, 2)` |
+| `distance`      | Euclidean distance to that point                            | `(M,)`   |
+| `segment_index` | Index of the winning segment in the original polyline       | `(M,)`   |
+| `segment_t`     | Clamped local parameter on the winning segment, from 0 to 1 | `(M,)`   |
+| `arc_length`    | Distance from the polyline start to the projected point     | `(M,)`   |
 
 `segment_t` is local to `segment_index`; `arc_length` is cumulative from the start of the polyline. Duplicate zero-length segments are tolerated.
 

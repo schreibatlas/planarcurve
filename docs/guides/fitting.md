@@ -84,14 +84,14 @@ print(fit.residual_rms, fit.iterations)
 
 `SplineFitOptions` controls:
 
-| Option | Effect |
-| --- | --- |
-| `smoothness` | Weight for second differences of adjacent control points. Larger values penalize rough control polygons. |
-| `seed_weight` | Regularization toward the supplied seed control points. |
-| `robust_scale` | Scale for the IRLS residual weights; large residuals are downweighted relative to this scale. |
-| `irls_iterations` | Number of iteratively reweighted least-squares solves. |
-| `endpoint_policy` | Independent start/end endpoint policies, each `free`, `locked`, or `anchored`. |
-| `endpoint_sigma` | Scale of the soft endpoint anchor residual. |
+| Option            | Effect                                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `smoothness`      | Weight for second differences of adjacent control points. Larger values penalize rough control polygons. |
+| `seed_weight`     | Regularization toward the supplied seed control points.                                                  |
+| `robust_scale`    | Scale for the IRLS residual weights; large residuals are downweighted relative to this scale.            |
+| `irls_iterations` | Number of iteratively reweighted least-squares solves.                                                   |
+| `endpoint_policy` | Independent start/end endpoint policies, each `free`, `locked`, or `anchored`.                           |
+| `endpoint_sigma`  | Scale of the soft endpoint anchor residual.                                                              |
 
 An optional `seed_control_points` argument replaces the basis controls as the regularization seed. Endpoint policies mean:
 
@@ -117,13 +117,13 @@ Position residuals are divided by the observed occurrence length. Heading residu
 
 `TrajectoryFitOptions` groups related controls:
 
-| Group | Options | Role |
-| --- | --- | --- |
-| Model complexity | `change_count`, `min_change_spacing`, `max_heading_rate_deg_per_u` | Number and spacing of profile changes, plus the allowed rate range. |
-| Sampling and initialization | `samples`, `smoothing_window` | Resampling density and smoothing used to estimate initial heading information. |
-| Optimization | `restarts`, `seed`, `robust_scale`, `max_nfev` | Repeatability, robust least-squares loss, and evaluation budget. |
-| Residual weights | `position_weight`, `tangent_weight`, `endpoint_weight`, `endpoint_heading_weight`, `turn_weight`, `smoothness_weight` | Relative influence of position, heading/tangent, endpoint, turn, and smoothness residuals. |
-| Residual scales | `heading_sigma_deg`, `turn_sigma_deg`, `smoothness_sigma_deg_per_u` | Units/scales used to normalize angular and heading-rate residuals. |
+| Group                       | Options                                                                                                               | Role                                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Model complexity            | `change_count`, `min_change_spacing`, `max_heading_rate_deg_per_u`                                                    | Number and spacing of profile changes, plus the allowed rate range.                        |
+| Sampling and initialization | `samples`, `smoothing_window`                                                                                         | Resampling density and smoothing used to estimate initial heading information.             |
+| Optimization                | `restarts`, `seed`, `robust_scale`, `max_nfev`                                                                        | Repeatability, robust least-squares loss, and evaluation budget.                           |
+| Residual weights            | `position_weight`, `tangent_weight`, `endpoint_weight`, `endpoint_heading_weight`, `turn_weight`, `smoothness_weight` | Relative influence of position, heading/tangent, endpoint, turn, and smoothness residuals. |
+| Residual scales             | `heading_sigma_deg`, `turn_sigma_deg`, `smoothness_sigma_deg_per_u`                                                   | Units/scales used to normalize angular and heading-rate residuals.                         |
 
 ### Inspect fit results
 

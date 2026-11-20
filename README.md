@@ -3,6 +3,7 @@
 `planarcurve` provides numerical building blocks for planar polylines, Bezier curves, cubic B-splines, normalized heading-rate trajectories, transforms, fitting, and SVG paths. Core geometry uses NumPy and remains independent of application-specific models.
 
 **Documentation:** [Guides, concepts, and API reference](https://planarcurve.readthedocs.io/en/latest/).
+
 ## Install
 
 ```bash
@@ -79,18 +80,20 @@ Here `u` is normalized progress in `[0, 1]`. Heading rates are degrees per unit 
 ## Fitting
 
 Fitting requires SciPy. Spline fitting estimates shared control points with weighted sparse least squares and IRLS. Trajectory fitting uses a normalized length-1, zero-heading profile plus a similarity transform for each occurrence. See the [fitting guide](https://planarcurve.readthedocs.io/en/latest/guides/fitting.html) for residual units, endpoint policies, options, and metrics.
+
 ## Supported spline geometry
 
 `BSplineCurve` intentionally supports clamped cubic geometry with simple interior knots, not arbitrary SciPy spline configurations. The `cubic-hermite` heading-rate mode computes shape-preserving slopes from rate knots; callers do not supply derivative values. See [spline concepts](https://planarcurve.readthedocs.io/en/latest/concepts/splines.html) for the full contract.
+
 ## Numerical contracts
 
-| Operation | Contract |
-| --- | --- |
-| Heading and theoretical trajectory arc length | Piecewise heading integration is analytic; arc length is exactly `length * u`. |
-| Trajectory positions and trajectory-to-cubic conversion | Adaptive numerical integration and sampled error checks, not a continuous global bound. |
-| Polyline length and Bezier evaluation/derivatives | Exact for the supplied geometry, up to floating-point arithmetic. |
-| Bezier flattening/length and B-spline arc-length sampling | Adaptive or dense-sample approximations. |
-| SVG curve lengths and endpoint tangents | Sampled approximations controlled by `samples_per_curve`. |
+| Operation                                                 | Contract                                                                                |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Heading and theoretical trajectory arc length             | Piecewise heading integration is analytic; arc length is exactly `length * u`.          |
+| Trajectory positions and trajectory-to-cubic conversion   | Adaptive numerical integration and sampled error checks, not a continuous global bound. |
+| Polyline length and Bezier evaluation/derivatives         | Exact for the supplied geometry, up to floating-point arithmetic.                       |
+| Bezier flattening/length and B-spline arc-length sampling | Adaptive or dense-sample approximations.                                                |
+| SVG curve lengths and endpoint tangents                   | Sampled approximations controlled by `samples_per_curve`.                               |
 
 Public points are finite 2D coordinates. Polyline projection compares every query with every segment, using `O(M*N)` time and temporary memory. SVG `sample_path()` accepts one subpath; use `sample_subpaths()` to preserve multiple subpaths without artificial connectors. Frozen result dataclasses do not make embedded NumPy arrays immutable.
 

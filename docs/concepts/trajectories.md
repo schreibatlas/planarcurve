@@ -36,7 +36,6 @@ Use `evaluate_trajectory_at()` for arbitrary `u` values or `sample_trajectory_by
 
 `trajectory_to_cubic_path()` adaptively subdivides profile intervals. It compares the cubic approximation with the numerically evaluated trajectory at the quarter, midpoint, and three-quarter parameters. `max_error` is therefore a sampled acceptance criterion, not a proof of a continuous global Hausdorff error bound.
 
-
 ## Reverse traversal and trajectory chains
 
 `reverse_trajectory()` builds the reversed heading-rate profile using `heading_rev(u) = heading(1-u) + 180°` and `rate_rev(u) = -rate(1-u)`. It does not reverse a sampled point array. The resulting trajectory starts at its own origin and matches the original curve traversed backward after rigid alignment.

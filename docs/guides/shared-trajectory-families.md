@@ -111,7 +111,6 @@ print(
 )
 ```
 
-
 ## Select a single trajectory
 
 A raw heading-rate or curvature estimate is a differential measurement derived from sampled points. Even after smoothing, it can expose local sampling error as sharp spikes. A fitted `HeadingRateProfile` instead describes turning with a compact set of rates and change positions over normalized progress `u`; its rates are in degrees per unit `u`. Model-order selection compares these fitted profiles and their robust fit costs, rather than selecting from raw pointwise curvature.

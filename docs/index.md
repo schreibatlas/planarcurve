@@ -4,15 +4,15 @@
 
 ## Choose a module
 
-| Need | Module | Optional dependency |
-| --- | --- | --- |
-| Polyline lengths, resampling, projection, and scores | `planarcurve.polyline` | None |
-| Bezier evaluation, derivatives, flattening, and length | `planarcurve.bezier` and `planarcurve.types` | None |
-| Normalized heading-rate trajectories | `planarcurve.trajectory` | None |
-| Affine and similarity transforms | `planarcurve.transforms` | None |
-| Cubic B-spline evaluation and conversion | `planarcurve.spline` | SciPy |
-| Spline and trajectory fitting | `planarcurve.fitting` | SciPy |
-| SVG path analysis and adapters | `planarcurve.svg` | FontTools |
+| Need                                                   | Module                                       | Optional dependency |
+| ------------------------------------------------------ | -------------------------------------------- | ------------------- |
+| Polyline lengths, resampling, projection, and scores   | `planarcurve.polyline`                       | None                |
+| Bezier evaluation, derivatives, flattening, and length | `planarcurve.bezier` and `planarcurve.types` | None                |
+| Normalized heading-rate trajectories                   | `planarcurve.trajectory`                     | None                |
+| Affine and similarity transforms                       | `planarcurve.transforms`                     | None                |
+| Cubic B-spline evaluation and conversion               | `planarcurve.spline`                         | SciPy               |
+| Spline and trajectory fitting                          | `planarcurve.fitting`                        | SciPy               |
+| SVG path analysis and adapters                         | `planarcurve.svg`                            | FontTools           |
 
 ## Quick example
 

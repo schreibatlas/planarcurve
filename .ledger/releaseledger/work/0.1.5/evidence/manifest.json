@@ -1,0 +1,29 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 421,
+      "deletions": 1,
+      "patch_file": "4672416.patch",
+      "patch_sha256": "91d1fbb867eae4410c190c5b7ee6d53b472f4c6c05c537bd90828da86c458817",
+      "paths": [
+        "docs/guides/shared-trajectory-families.md",
+        "examples/select_single_trajectory_complexity.py",
+        "planarcurve/fitting/__init__.py",
+        "planarcurve/fitting/model_selection.py",
+        "tests/test_trajectory_single_model_selection.py"
+      ],
+      "sha": "467241678c69c75358381600c086a34b4def6d78",
+      "short_sha": "4672416",
+      "source_ref": "git:467241678c69c75358381600c086a34b4def6d78"
+    }
+  ],
+  "git_base_ref": "4ae91abaa8c8eeb666337cb4cd66fb79d726d2a4",
+  "git_base_sha": "4ae91abaa8c8eeb666337cb4cd66fb79d726d2a4",
+  "git_head_ref": "467241678c69c75358381600c086a34b4def6d78",
+  "git_head_sha": "467241678c69c75358381600c086a34b4def6d78",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.1.5",
+  "schema_version": 1
+}

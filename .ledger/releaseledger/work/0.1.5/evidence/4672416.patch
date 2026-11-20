@@ -1,0 +1,504 @@
+ docs/guides/shared-trajectory-families.md       |  30 +++
+ examples/select_single_trajectory_complexity.py |  65 +++++++
+ planarcurve/fitting/__init__.py                 |   6 +
+ planarcurve/fitting/model_selection.py          |  80 +++++++-
+ tests/test_trajectory_single_model_selection.py | 241 ++++++++++++++++++++++++
+ 5 files changed, 421 insertions(+), 1 deletion(-)
+
+diff --git a/docs/guides/shared-trajectory-families.md b/docs/guides/shared-trajectory-families.md
+index d135683..48a30f9 100644
+--- a/docs/guides/shared-trajectory-families.md
++++ b/docs/guides/shared-trajectory-families.md
+@@ -111,6 +111,36 @@ print(
+ )
+ ```
+
++
++## Select a single trajectory
++
++A raw heading-rate or curvature estimate is a differential measurement derived from sampled points. Even after smoothing, it can expose local sampling error as sharp spikes. A fitted `HeadingRateProfile` instead describes turning with a compact set of rates and change positions over normalized progress `u`; its rates are in degrees per unit `u`. Model-order selection compares these fitted profiles and their robust fit costs, rather than selecting from raw pointwise curvature.
++
++`select_trajectory_model` fits each requested `change_count` and returns the selected `TrajectoryFitResult` plus a `TrajectoryModelCandidate` for every count. Each candidate reports its fit, complexity cost, and score. The complexity term uses the shared policy, with `HeadingRateParameterization.size + 4` free parameters. Single-curve selection has no occurrence-level validation split, so set `validation_fraction=0.0` when supplying `TrajectoryModelSelectionOptions`.
++
++The selected trajectory is canonical: unit length and start heading zero. Its `Similarity2D` transform carries the observed occurrence's scale, rotation, and translation separately. This lets callers compare the normalized steering profile without mixing in placement or size.
++
++```python
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryModelSelectionOptions,
++    select_trajectory_model,
++)
++
++selection = select_trajectory_model(
++    points,
++    fit_options=TrajectoryFitOptions(change_count=0, samples=32, restarts=0),
++    selection_options=TrajectoryModelSelectionOptions(
++        change_counts=(0, 1, 2, 3), validation_fraction=0.0, seed=7
++    ),
++)
++print(selection.selected_change_count, selection.selected.metrics)
++print(selection.selected.trajectory.heading_rate)
++print(selection.selected.transform)
++```
++
++Fit metrics describe the approximation of the input centerline. Candidate scores add the explicit complexity penalty to robust fit cost. See `examples/select_single_trajectory_complexity.py` for a complete smooth-polyline example with knot rates, total turn, and fit metrics.
++
+ ## Synthetic examples
+
+ Run the standalone examples from the repository root:
+diff --git a/examples/select_single_trajectory_complexity.py b/examples/select_single_trajectory_complexity.py
+new file mode 100644
+index 0000000..fe7bd18
+--- /dev/null
++++ b/examples/select_single_trajectory_complexity.py
+@@ -0,0 +1,65 @@
++"""Select a compact heading-rate model for one smooth planar trajectory."""
++
++from __future__ import annotations
++
++import numpy as np
++
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryModelSelectionOptions,
++    select_trajectory_model,
++)
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_trajectory,
++    trajectory_total_turn,
++)
++
++
++def main() -> None:
++    source = Trajectory2D(
++        length=1.0,
++        start_heading_deg=0.0,
++        heading_rate=HeadingRateProfile(
++            270.0,
++            270.0,
++            changes=(HeadingRateChange(0.5, -270.0),),
++        ),
++    )
++    points = evaluate_trajectory(source, count=97).xy
++    result = select_trajectory_model(
++        points,
++        fit_options=TrajectoryFitOptions(
++            change_count=0,
++            samples=40,
++            restarts=0,
++            max_nfev=150,
++        ),
++        selection_options=TrajectoryModelSelectionOptions(
++            change_counts=(0, 1, 2, 3, 4),
++            validation_fraction=0.0,
++            seed=7,
++        ),
++    )
++    assert result.selected.success
++
++    profile = result.selected.trajectory.heading_rate
++    knot_positions = (0.0, *(change.at for change in profile.changes), 1.0)
++    knot_rates = (
++        profile.start_rate_deg_per_u,
++        *(change.heading_rate_deg_per_u for change in profile.changes),
++        profile.end_rate_deg_per_u,
++    )
++
++    print(f"Selected change count: {result.selected_change_count}")
++    print(f"Knot positions: {np.asarray(knot_positions)}")
++    print(f"Knot rates (degrees per normalized progress): {np.asarray(knot_rates)}")
++    print(f"Total turn (degrees): {trajectory_total_turn(result.selected.trajectory):.3f}")
++    print(f"Fit cost: {result.selected.cost:.6f}")
++    print(f"Fit error metrics: {dict(result.selected.metrics)}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/planarcurve/fitting/__init__.py b/planarcurve/fitting/__init__.py
+index 880b708..cf5b68e 100644
+--- a/planarcurve/fitting/__init__.py
++++ b/planarcurve/fitting/__init__.py
+@@ -6,8 +6,11 @@ from .family import (
+     fit_trajectory_family,
+ )
+ from .model_selection import (
++    TrajectoryModelCandidate,
+     TrajectoryModelSelectionOptions,
++    TrajectoryModelSelectionResult,
+     select_shared_trajectory_model,
++    select_trajectory_model,
+ )
+ from .parameters import HeadingRateParameterization
+ from .policy import SplineEndpointPolicy
+@@ -38,7 +41,9 @@ __all__ = [
+     "TrajectoryFamilyModel",
+     "TrajectoryFitOptions",
+     "TrajectoryFitResult",
++    "TrajectoryModelCandidate",
+     "TrajectoryModelSelectionOptions",
++    "TrajectoryModelSelectionResult",
+     "TrajectoryOccurrenceFit",
+     "TrajectoryVariationPolicy",
+     "fit_polyline_spline",
+@@ -46,4 +51,5 @@ __all__ = [
+     "fit_trajectory",
+     "fit_trajectory_family",
+     "select_shared_trajectory_model",
++    "select_trajectory_model",
+ ]
+diff --git a/planarcurve/fitting/model_selection.py b/planarcurve/fitting/model_selection.py
+index f37ed7f..bbc8c08 100644
+--- a/planarcurve/fitting/model_selection.py
++++ b/planarcurve/fitting/model_selection.py
+@@ -20,11 +20,13 @@ from ..trajectory import Trajectory2D, evaluate_trajectory
+ from ..transforms import Similarity2D
+ from ..types import _require_integer
+ from .family import TrajectoryFamilyFitResult, fit_trajectory_family
+-from .parameters import decode_positive, encode_positive
++from .parameters import HeadingRateParameterization, decode_positive, encode_positive
+ from .trajectory import (
+     TrajectoryFitOptions,
++    TrajectoryFitResult,
+     _profile_residuals,
+     _target_state,
++    fit_trajectory,
+ )
+
+
+@@ -61,6 +63,25 @@ class TrajectoryModelSelectionOptions:
+         object.__setattr__(self, "seed", _require_integer(self.seed, name="seed"))
+
+
++@dataclass(frozen=True)
++class TrajectoryModelCandidate:
++    """One fitted model-order candidate and its regularized score."""
++
++    change_count: int
++    fit: TrajectoryFitResult
++    complexity_cost: float
++    score: float
++
++
++@dataclass(frozen=True)
++class TrajectoryModelSelectionResult:
++    """Selected single-trajectory fit together with all candidate diagnostics."""
++
++    selected: TrajectoryFitResult
++    selected_change_count: int
++    candidates: tuple[TrajectoryModelCandidate, ...]
++
++
+ def _split_indices(
+     count: int, options: TrajectoryModelSelectionOptions
+ ) -> tuple[np.ndarray, np.ndarray]:
+@@ -188,3 +209,60 @@ def select_shared_trajectory_model(
+     converged = [candidate for candidate in candidates if candidate.success]
+     pool = converged or candidates
+     return min(pool, key=lambda candidate: (candidate.score, candidate.model.change_count))
++
++
++def select_trajectory_model(
++    points: ArrayLike,
++    *,
++    fit_options: TrajectoryFitOptions,
++    selection_options: TrajectoryModelSelectionOptions = TrajectoryModelSelectionOptions(
++        validation_fraction=0.0
++    ),
++) -> TrajectoryModelSelectionResult:
++    """Fit requested profile complexities and select the best single-curve model.
++
++    The score is fit cost plus the shared selector's configurable complexity
++    penalty. Occurrence-level validation is not meaningful for one curve, so
++    ``selection_options.validation_fraction`` must be zero.
++    """
++    if not isinstance(fit_options, TrajectoryFitOptions):
++        raise TypeError("fit_options must be TrajectoryFitOptions")
++    if not isinstance(selection_options, TrajectoryModelSelectionOptions):
++        raise TypeError("selection_options must be TrajectoryModelSelectionOptions")
++    if selection_options.validation_fraction != 0.0:
++        raise ValueError("validation_fraction must be zero for single-trajectory model selection")
++
++    complexity_factor = selection_options.complexity_weight * log1p(
++        1.0 / selection_options.parameter_precision
++    )
++    candidates = []
++    for change_count in selection_options.change_counts:
++        candidate_options = replace(
++            fit_options,
++            change_count=change_count,
++            seed=selection_options.seed,
++        )
++        fit = fit_trajectory(points, candidate_options)
++        parameterization = HeadingRateParameterization(
++            change_count=change_count,
++            min_change_spacing=candidate_options.min_change_spacing,
++            max_heading_rate_deg_per_u=candidate_options.max_heading_rate_deg_per_u,
++        )
++        complexity_cost = complexity_factor * (parameterization.size + 4)
++        candidates.append(
++            TrajectoryModelCandidate(
++                change_count=change_count,
++                fit=fit,
++                complexity_cost=complexity_cost,
++                score=fit.cost + complexity_cost,
++            )
++        )
++
++    converged = [candidate for candidate in candidates if candidate.fit.success]
++    pool = converged or candidates
++    selected = min(pool, key=lambda candidate: (candidate.score, candidate.change_count))
++    return TrajectoryModelSelectionResult(
++        selected=selected.fit,
++        selected_change_count=selected.change_count,
++        candidates=tuple(candidates),
++    )
+diff --git a/tests/test_trajectory_single_model_selection.py b/tests/test_trajectory_single_model_selection.py
+new file mode 100644
+index 0000000..241cb2e
+--- /dev/null
++++ b/tests/test_trajectory_single_model_selection.py
+@@ -0,0 +1,241 @@
++import numpy as np
++import pytest
++
++from planarcurve.fitting import (
++    HeadingRateParameterization,
++    TrajectoryFitOptions,
++    TrajectoryModelCandidate,
++    TrajectoryModelSelectionOptions,
++    TrajectoryModelSelectionResult,
++    model_selection,
++    select_trajectory_model,
++)
++from planarcurve.fitting.trajectory import TrajectoryFitResult
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_heading_rate,
++    evaluate_trajectory,
++    trajectory_total_turn,
++)
++from planarcurve.transforms import Similarity2D
++
++
++def _selection_options(
++    change_counts: tuple[int, ...] = (0, 1, 2, 3), *, complexity_weight: float = 0.01
++) -> TrajectoryModelSelectionOptions:
++    return TrajectoryModelSelectionOptions(
++        change_counts=change_counts,
++        validation_fraction=0.0,
++        complexity_weight=complexity_weight,
++        parameter_precision=1e-3,
++        seed=7,
++    )
++
++
++def _fit_options() -> TrajectoryFitOptions:
++    return TrajectoryFitOptions(change_count=0, samples=32, restarts=0, max_nfev=100)
++
++
++def _points(profile: HeadingRateProfile, *, count: int = 65) -> np.ndarray:
++    trajectory = Trajectory2D(length=1.0, start_heading_deg=0.0, heading_rate=profile)
++    return evaluate_trajectory(trajectory, count=count).xy
++
++
++def _s_curve_points() -> np.ndarray:
++    return _points(
++        HeadingRateProfile(
++            270.0,
++            270.0,
++            changes=(HeadingRateChange(0.5, -270.0),),
++        )
++    )
++
++
++def test_straight_line_selects_minimal_profile_and_succeeds():
++    points = np.column_stack((np.linspace(0.0, 1.0, 65), np.zeros(65)))
++
++    result = select_trajectory_model(
++        points, fit_options=_fit_options(), selection_options=_selection_options()
++    )
++
++    assert result.selected_change_count == 0
++    assert result.selected.success
++    assert abs(trajectory_total_turn(result.selected.trajectory)) < 1.0
++    assert result.selected.trajectory.length == 1.0
++    assert result.selected.trajectory.start_heading_deg == 0.0
++    assert result.selected.transform.scale > 0.0
++
++
++def test_constant_curvature_arc_uses_minimal_profile_and_fits_within_tolerance():
++    points = _points(HeadingRateProfile(90.0, 90.0))
++
++    result = select_trajectory_model(
++        points, fit_options=_fit_options(), selection_options=_selection_options()
++    )
++
++    assert result.selected_change_count == 0
++    assert result.selected.success
++    assert result.selected.metrics["p95_position_error"] < 0.02
++    assert abs(trajectory_total_turn(result.selected.trajectory) - 90.0) < 12.0
++
++
++def test_s_curve_selects_turning_phases_in_the_known_order():
++    result = select_trajectory_model(
++        _s_curve_points(), fit_options=_fit_options(), selection_options=_selection_options()
++    )
++    rates = evaluate_heading_rate(
++        result.selected.trajectory.heading_rate, np.array([0.05, 0.5, 0.95])
++    )
++
++    assert result.selected_change_count > 0
++    assert result.selected.success
++    assert rates[0] > 0.0
++    assert rates[1] < 0.0
++    assert rates[2] > 0.0
++
++
++def test_small_coordinate_noise_preserves_selected_order_and_total_turn():
++    points = _s_curve_points()
++    noisy = points + np.random.default_rng(15).normal(0.0, 0.002, points.shape)
++
++    exact = select_trajectory_model(
++        points, fit_options=_fit_options(), selection_options=_selection_options()
++    )
++    perturbed = select_trajectory_model(
++        noisy, fit_options=_fit_options(), selection_options=_selection_options()
++    )
++
++    assert abs(perturbed.selected_change_count - exact.selected_change_count) <= 1
++    assert (
++        abs(
++            trajectory_total_turn(perturbed.selected.trajectory)
++            - trajectory_total_turn(exact.selected.trajectory)
++        )
++        < 10.0
++    )
++
++
++def test_similarity_transform_preserves_canonical_profile_and_moves_placement():
++    points = _s_curve_points()
++    placement = Similarity2D(scale=2.8, rotation_deg=57.0, dx=3.0, dy=-1.0)
++    original = select_trajectory_model(
++        points, fit_options=_fit_options(), selection_options=_selection_options()
++    )
++    transformed = select_trajectory_model(
++        placement.apply(points),
++        fit_options=_fit_options(),
++        selection_options=_selection_options(),
++    )
++
++    grid = np.linspace(0.0, 1.0, 21)
++    original_rates = evaluate_heading_rate(original.selected.trajectory.heading_rate, grid)
++    transformed_rates = evaluate_heading_rate(transformed.selected.trajectory.heading_rate, grid)
++    expected_translation = placement.apply(
++        np.array([[original.selected.transform.dx, original.selected.transform.dy]])
++    )[0]
++
++    assert transformed.selected_change_count == original.selected_change_count
++    np.testing.assert_allclose(transformed_rates, original_rates, atol=1.0)
++    assert transformed.selected.transform.scale == pytest.approx(
++        placement.scale * original.selected.transform.scale, rel=1e-3
++    )
++    assert transformed.selected.transform.rotation_deg == pytest.approx(
++        placement.rotation_deg + original.selected.transform.rotation_deg, abs=0.1
++    )
++    np.testing.assert_allclose(
++        [transformed.selected.transform.dx, transformed.selected.transform.dy],
++        expected_translation,
++        atol=0.02,
++    )
++
++
++def test_selection_is_deterministic_and_returns_candidates_in_requested_order():
++    points = _s_curve_points()
++    options = _selection_options((2, 0, 1))
++
++    first = select_trajectory_model(points, fit_options=_fit_options(), selection_options=options)
++    second = select_trajectory_model(points, fit_options=_fit_options(), selection_options=options)
++
++    assert [candidate.change_count for candidate in first.candidates] == [2, 0, 1]
++    assert first.selected_change_count == second.selected_change_count
++    np.testing.assert_allclose(
++        [candidate.score for candidate in first.candidates],
++        [candidate.score for candidate in second.candidates],
++    )
++    np.testing.assert_allclose(
++        evaluate_heading_rate(first.selected.trajectory.heading_rate, np.linspace(0, 1, 21)),
++        evaluate_heading_rate(second.selected.trajectory.heading_rate, np.linspace(0, 1, 21)),
++    )
++
++
++def test_failed_candidates_do_not_hide_successes_and_all_failed_is_deterministic(monkeypatch):
++    trajectory = Trajectory2D(1.0, 0.0, HeadingRateProfile(0.0, 0.0))
++    outcomes = {0: (False, 0.0), 1: (True, 10.0), 2: (True, 10.0)}
++
++    def fake_fit(points, options):
++        success, cost = outcomes[options.change_count]
++        return TrajectoryFitResult(trajectory, Similarity2D(), success, cost, {})
++
++    monkeypatch.setattr(model_selection, "fit_trajectory", fake_fit)
++    options = _selection_options((0, 1, 2), complexity_weight=0.0)
++    result = select_trajectory_model(
++        [[0.0, 0.0], [1.0, 0.0]], fit_options=_fit_options(), selection_options=options
++    )
++
++    assert isinstance(result, TrajectoryModelSelectionResult)
++    assert result.selected_change_count == 1
++    assert all(isinstance(candidate, TrajectoryModelCandidate) for candidate in result.candidates)
++
++    outcomes.update({0: (False, 10.0), 1: (False, 10.0), 2: (False, 0.0)})
++    failed = select_trajectory_model(
++        [[0.0, 0.0], [1.0, 0.0]], fit_options=_fit_options(), selection_options=options
++    )
++    repeated = select_trajectory_model(
++        [[0.0, 0.0], [1.0, 0.0]], fit_options=_fit_options(), selection_options=options
++    )
++
++    assert not failed.selected.success
++    assert failed.selected_change_count == repeated.selected_change_count == 2
++
++
++def test_complexity_penalty_uses_codec_size_and_increases_with_change_count(monkeypatch):
++    trajectory = Trajectory2D(1.0, 0.0, HeadingRateProfile(0.0, 0.0))
++    monkeypatch.setattr(
++        model_selection,
++        "fit_trajectory",
++        lambda points, options: TrajectoryFitResult(trajectory, Similarity2D(), True, 2.0, {}),
++    )
++    options = _selection_options((0, 1, 2), complexity_weight=0.1)
++
++    result = select_trajectory_model(
++        [[0.0, 0.0], [1.0, 0.0]], fit_options=_fit_options(), selection_options=options
++    )
++    factor = options.complexity_weight * np.log1p(1.0 / options.parameter_precision)
++    parameter_counts = [
++        HeadingRateParameterization(
++            change_count=count, min_change_spacing=0.02, max_heading_rate_deg_per_u=36000.0
++        ).size
++        + 4
++        for count in options.change_counts
++    ]
++
++    assert [candidate.score for candidate in result.candidates] == pytest.approx(
++        [2.0 + factor * count for count in parameter_counts]
++    )
++    assert all(
++        first.complexity_cost < second.complexity_cost
++        for first, second in zip(result.candidates, result.candidates[1:], strict=False)
++    )
++
++
++def test_nonzero_validation_fraction_is_not_accepted_for_one_curve():
++    options = TrajectoryModelSelectionOptions(change_counts=(0,), validation_fraction=0.2)
++
++    with pytest.raises(ValueError, match="validation_fraction must be zero"):
++        select_trajectory_model(
++            [[0.0, 0.0], [1.0, 0.0]],
++            fit_options=_fit_options(),
++            selection_options=options,
++        )
