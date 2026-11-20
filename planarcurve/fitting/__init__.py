@@ -6,8 +6,11 @@ from .family import (
     fit_trajectory_family,
 )
 from .model_selection import (
+    TrajectoryModelCandidate,
     TrajectoryModelSelectionOptions,
+    TrajectoryModelSelectionResult,
     select_shared_trajectory_model,
+    select_trajectory_model,
 )
 from .parameters import HeadingRateParameterization
 from .policy import SplineEndpointPolicy
@@ -38,7 +41,9 @@ __all__ = [
     "TrajectoryFamilyModel",
     "TrajectoryFitOptions",
     "TrajectoryFitResult",
+    "TrajectoryModelCandidate",
     "TrajectoryModelSelectionOptions",
+    "TrajectoryModelSelectionResult",
     "TrajectoryOccurrenceFit",
     "TrajectoryVariationPolicy",
     "fit_polyline_spline",
@@ -46,4 +51,5 @@ __all__ = [
     "fit_trajectory",
     "fit_trajectory_family",
     "select_shared_trajectory_model",
+    "select_trajectory_model",
 ]

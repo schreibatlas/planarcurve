@@ -20,11 +20,13 @@ from ..trajectory import Trajectory2D, evaluate_trajectory
 from ..transforms import Similarity2D
 from ..types import _require_integer
 from .family import TrajectoryFamilyFitResult, fit_trajectory_family
-from .parameters import decode_positive, encode_positive
+from .parameters import HeadingRateParameterization, decode_positive, encode_positive
 from .trajectory import (
     TrajectoryFitOptions,
+    TrajectoryFitResult,
     _profile_residuals,
     _target_state,
+    fit_trajectory,
 )
 
 
@@ -59,6 +61,25 @@ class TrajectoryModelSelectionOptions:
         if not isfinite(self.parameter_precision) or not 0.0 < self.parameter_precision <= 1.0:
             raise ValueError("parameter_precision must lie in (0, 1]")
         object.__setattr__(self, "seed", _require_integer(self.seed, name="seed"))
+
+
+@dataclass(frozen=True)
+class TrajectoryModelCandidate:
+    """One fitted model-order candidate and its regularized score."""
+
+    change_count: int
+    fit: TrajectoryFitResult
+    complexity_cost: float
+    score: float
+
+
+@dataclass(frozen=True)
+class TrajectoryModelSelectionResult:
+    """Selected single-trajectory fit together with all candidate diagnostics."""
+
+    selected: TrajectoryFitResult
+    selected_change_count: int
+    candidates: tuple[TrajectoryModelCandidate, ...]
 
 
 def _split_indices(
@@ -188,3 +209,60 @@ def select_shared_trajectory_model(
     converged = [candidate for candidate in candidates if candidate.success]
     pool = converged or candidates
     return min(pool, key=lambda candidate: (candidate.score, candidate.model.change_count))
+
+
+def select_trajectory_model(
+    points: ArrayLike,
+    *,
+    fit_options: TrajectoryFitOptions,
+    selection_options: TrajectoryModelSelectionOptions = TrajectoryModelSelectionOptions(
+        validation_fraction=0.0
+    ),
+) -> TrajectoryModelSelectionResult:
+    """Fit requested profile complexities and select the best single-curve model.
+
+    The score is fit cost plus the shared selector's configurable complexity
+    penalty. Occurrence-level validation is not meaningful for one curve, so
+    ``selection_options.validation_fraction`` must be zero.
+    """
+    if not isinstance(fit_options, TrajectoryFitOptions):
+        raise TypeError("fit_options must be TrajectoryFitOptions")
+    if not isinstance(selection_options, TrajectoryModelSelectionOptions):
+        raise TypeError("selection_options must be TrajectoryModelSelectionOptions")
+    if selection_options.validation_fraction != 0.0:
+        raise ValueError("validation_fraction must be zero for single-trajectory model selection")
+
+    complexity_factor = selection_options.complexity_weight * log1p(
+        1.0 / selection_options.parameter_precision
+    )
+    candidates = []
+    for change_count in selection_options.change_counts:
+        candidate_options = replace(
+            fit_options,
+            change_count=change_count,
+            seed=selection_options.seed,
+        )
+        fit = fit_trajectory(points, candidate_options)
+        parameterization = HeadingRateParameterization(
+            change_count=change_count,
+            min_change_spacing=candidate_options.min_change_spacing,
+            max_heading_rate_deg_per_u=candidate_options.max_heading_rate_deg_per_u,
+        )
+        complexity_cost = complexity_factor * (parameterization.size + 4)
+        candidates.append(
+            TrajectoryModelCandidate(
+                change_count=change_count,
+                fit=fit,
+                complexity_cost=complexity_cost,
+                score=fit.cost + complexity_cost,
+            )
+        )
+
+    converged = [candidate for candidate in candidates if candidate.fit.success]
+    pool = converged or candidates
+    selected = min(pool, key=lambda candidate: (candidate.score, candidate.change_count))
+    return TrajectoryModelSelectionResult(
+        selected=selected.fit,
+        selected_change_count=selected.change_count,
+        candidates=tuple(candidates),
+    )

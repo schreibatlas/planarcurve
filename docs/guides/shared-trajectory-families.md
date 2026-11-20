@@ -111,6 +111,36 @@ print(
 )
 ```
 
+
+## Select a single trajectory
+
+A raw heading-rate or curvature estimate is a differential measurement derived from sampled points. Even after smoothing, it can expose local sampling error as sharp spikes. A fitted `HeadingRateProfile` instead describes turning with a compact set of rates and change positions over normalized progress `u`; its rates are in degrees per unit `u`. Model-order selection compares these fitted profiles and their robust fit costs, rather than selecting from raw pointwise curvature.
+
+`select_trajectory_model` fits each requested `change_count` and returns the selected `TrajectoryFitResult` plus a `TrajectoryModelCandidate` for every count. Each candidate reports its fit, complexity cost, and score. The complexity term uses the shared policy, with `HeadingRateParameterization.size + 4` free parameters. Single-curve selection has no occurrence-level validation split, so set `validation_fraction=0.0` when supplying `TrajectoryModelSelectionOptions`.
+
+The selected trajectory is canonical: unit length and start heading zero. Its `Similarity2D` transform carries the observed occurrence's scale, rotation, and translation separately. This lets callers compare the normalized steering profile without mixing in placement or size.
+
+```python
+from planarcurve.fitting import (
+    TrajectoryFitOptions,
+    TrajectoryModelSelectionOptions,
+    select_trajectory_model,
+)
+
+selection = select_trajectory_model(
+    points,
+    fit_options=TrajectoryFitOptions(change_count=0, samples=32, restarts=0),
+    selection_options=TrajectoryModelSelectionOptions(
+        change_counts=(0, 1, 2, 3), validation_fraction=0.0, seed=7
+    ),
+)
+print(selection.selected_change_count, selection.selected.metrics)
+print(selection.selected.trajectory.heading_rate)
+print(selection.selected.transform)
+```
+
+Fit metrics describe the approximation of the input centerline. Candidate scores add the explicit complexity penalty to robust fit cost. See `examples/select_single_trajectory_complexity.py` for a complete smooth-polyline example with knot rates, total turn, and fit metrics.
+
 ## Synthetic examples
 
 Run the standalone examples from the repository root:
