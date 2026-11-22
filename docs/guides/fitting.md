@@ -49,8 +49,13 @@ from planarcurve.fitting import (
     SharedTrajectoryFitResult,
     TrajectoryFitOptions,
     TrajectoryFitResult,
+    TrajectoryFitSeed,
+    TrajectoryRefinementOptions,
+    TrajectoryRefinementResult,
+    TrajectoryRefinementStep,
     fit_shared_trajectory_profile,
     fit_trajectory,
+    refine_trajectory_model,
 )
 ```
 
@@ -109,7 +114,20 @@ Trajectory fitting represents shape canonically:
 - its starting heading is 0 degrees;
 - each observed occurrence gets a separate positive-scale `Similarity2D` transform.
 
+
+
 This separates normalized shape from occurrence scale, rotation, and translation. `fit_trajectory()` estimates one profile and one transform. `fit_shared_trajectory_profile()` estimates one shared profile and one transform for each input occurrence.
+
+`TrajectoryFitSeed` warm-starts a single-curve fit from a canonical trajectory and its `Similarity2D` placement:
+
+```python
+from planarcurve.fitting import TrajectoryFitSeed, fit_trajectory
+
+seed = TrajectoryFitSeed(previous_fit.trajectory, previous_fit.transform)
+fit = fit_trajectory(points, options, initial=seed)
+```
+
+The seed's heading-rate change count must equal `options.change_count`. The seed is the first optimizer attempt; configured restarts still run around it. Passing `initial=None` retains the existing initialization behavior.
 
 ### Residual units and weights
 
@@ -137,3 +155,12 @@ Position residuals are divided by the observed occurrence length. Heading residu
 The shared-profile result reports aggregate median and 95th-percentile position errors plus `max_total_turn_error_deg` across occurrences. A result object alone does not imply convergence. Callers should inspect `.success`, `.cost`, and the metrics.
 
 The [shared trajectory example](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) synthesizes several scaled and rotated occurrences, fits one shared profile, and reports each placement transform.
+
+
+### Progressively refine model complexity
+
+`refine_trajectory_model()` requires `fit_options.change_count == 0`. It fits that base model, uses normalized position and heading residuals to propose legal smooth heading-rate knots, warm-starts child fits, and accepts the best child only when both its absolute and relative regularized-score gains meet their thresholds. The complexity term uses the same `parameter_count * complexity_weight * log1p(1 / parameter_precision)` formula as independent model selection.
+
+`TrajectoryRefinementResult.steps` includes the base fit and every proposed child. Each step reports fit and complexity costs, score, gain, acceptance, and a stable reason. `optimizer_evaluations` sums SciPy evaluations across all attempted fits. Change points are smooth steering controls, not geometric corners.
+
+Model complexity is the number of interior heading-rate changes. It is distinct from `samples`, which controls fit resampling density, and `residual_samples`, which controls the grid used to locate candidate changes. Increasing either sampling count does not force a more complex model. Run [`refine_trajectory_complexity.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/refine_trajectory_complexity.py) for a synthetic S-curve trace.

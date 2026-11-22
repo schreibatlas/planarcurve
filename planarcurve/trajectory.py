@@ -224,6 +224,31 @@ def evaluate_heading_rate(profile: HeadingRateProfile, u: ArrayLike) -> FloatArr
     )
 
 
+def insert_heading_rate_change(profile: HeadingRateProfile, at: float) -> HeadingRateProfile:
+    """Return a warm-start profile with a new knot at normalized progress ``at``.
+
+    The new rate matches the original profile at the insertion point. Recomputing
+    cubic-Hermite slopes can change the interpolated profile elsewhere, so this is
+    a warm-start construction rather than an exactly equivalent representation.
+    """
+    position = float(at)
+    if not isfinite(position) or not 0.0 < position < 1.0:
+        raise ValueError("insertion progress must lie strictly inside (0, 1)")
+    if any(change.at == position for change in profile.changes):
+        raise ValueError("insertion progress duplicates an existing change location")
+    new_change = HeadingRateChange(
+        at=position,
+        heading_rate_deg_per_u=float(evaluate_heading_rate(profile, np.array([position]))[0]),
+    )
+    changes = tuple(sorted((*profile.changes, new_change), key=lambda change: change.at))
+    return HeadingRateProfile(
+        start_rate_deg_per_u=profile.start_rate_deg_per_u,
+        changes=changes,
+        end_rate_deg_per_u=profile.end_rate_deg_per_u,
+        interpolation=profile.interpolation,
+    )
+
+
 def integrated_heading_rate(profile: HeadingRateProfile, u: ArrayLike) -> FloatArray:
     """Return the exact integral of heading rate from zero to each ``u`` value."""
     values = _validated_parameters(u)

@@ -14,6 +14,7 @@ EXAMPLES = (
     ("svg_pipeline.py", None),
     ("fit_polyline_to_spline.py", "fit_polyline_to_spline.svg"),
     ("fit_shared_trajectory.py", "fit_shared_trajectory.svg"),
+    ("refine_trajectory_complexity.py", None),
 )
 
 

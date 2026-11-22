@@ -3,7 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from planarcurve.transforms import Affine2D, Similarity2D, fit_similarity_transform
+from planarcurve.transforms import (
+    Affine2D,
+    Similarity2D,
+    fit_similarity_transform,
+    transform_cubic_path,
+)
+from planarcurve.types import CubicPath, CubicSegment
 
 
 def test_affine_inverse_and_composition_order():
@@ -139,3 +145,64 @@ def test_similarity_affine_conversion_is_consistent():
     similarity = Similarity2D(scale=1.75, rotation_deg=37.0, dx=5.0, dy=-8.0)
     points = np.array([[0.0, 1.0], [2.0, -3.0]])
     np.testing.assert_allclose(similarity.as_affine().apply(points), similarity.apply(points))
+
+
+def _sample_cubic(bezier, parameters: np.ndarray) -> np.ndarray:
+    points = np.asarray([bezier.p0, bezier.p1, bezier.p2, bezier.p3])
+    t = parameters[:, None]
+    one_minus_t = 1.0 - t
+    return (
+        one_minus_t**3 * points[0]
+        + 3.0 * one_minus_t**2 * t * points[1]
+        + 3.0 * one_minus_t * t**2 * points[2]
+        + t**3 * points[3]
+    )
+
+
+def _sample_path(path: CubicPath, parameters: np.ndarray) -> tuple[np.ndarray, ...]:
+    return tuple(_sample_cubic(bezier, parameters) for bezier in path.to_beziers())
+
+
+def test_transform_cubic_path_identity_and_translation():
+    path = CubicPath(
+        start=(1.0, 2.0),
+        segments=(
+            CubicSegment((2.0, 3.0), (4.0, 3.0), (5.0, 1.0)),
+            CubicSegment((6.0, 0.0), (7.0, 3.0), (8.0, 2.0)),
+        ),
+    )
+
+    assert transform_cubic_path(path, Affine2D.identity()) == path
+    translated = transform_cubic_path(path, Affine2D.translation_only(3.0, -4.0))
+    np.testing.assert_allclose(translated.start, [4.0, -2.0])
+    np.testing.assert_allclose(translated.segments[0].c1, [5.0, -1.0])
+    np.testing.assert_allclose(translated.segments[0].c2, [7.0, -1.0])
+    np.testing.assert_allclose(translated.segments[0].end, [8.0, -3.0])
+    np.testing.assert_allclose(translated.segments[1].end, [11.0, -2.0])
+    assert len(translated.segments) == len(path.segments)
+
+
+def test_transform_cubic_path_similarity_matches_affine_and_sampled_points():
+    path = CubicPath(
+        start=(1.0, 2.0),
+        segments=(
+            CubicSegment((2.0, 3.0), (4.0, 3.0), (5.0, 1.0)),
+            CubicSegment((6.0, 0.0), (7.0, 3.0), (8.0, 2.0)),
+        ),
+    )
+    transform = Similarity2D(scale=1.7, rotation_deg=37.0, dx=5.0, dy=-8.0)
+    transformed = transform_cubic_path(path, transform)
+    affine_transformed = transform_cubic_path(path, transform.as_affine())
+
+    assert transformed == affine_transformed
+    parameters = np.linspace(0.0, 1.0, 17)
+    for original_samples, transformed_samples in zip(
+        _sample_path(path, parameters),
+        _sample_path(transformed, parameters),
+        strict=True,
+    ):
+        np.testing.assert_allclose(
+            transformed_samples,
+            transform.apply(original_samples),
+            atol=1e-12,
+        )

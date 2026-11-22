@@ -2,6 +2,9 @@
 
 Normalized-progress heading-rate trajectories, exact reverse traversal, pose propagation, trajectory-chain sampling, and cubic-path approximation.
 
+
+`insert_heading_rate_change(profile, at)` returns a new profile with an evaluated rate knot at normalized progress `at`. It preserves the interpolation kind and is intended as a warm-start construction. Inserting a knot may change the cubic-Hermite interpolation away from the insertion point.
+
 ```{automodule} planarcurve.trajectory
 :members:
 :undoc-members:

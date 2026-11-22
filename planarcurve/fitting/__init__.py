@@ -9,6 +9,10 @@ from .model_selection import (
     TrajectoryModelCandidate,
     TrajectoryModelSelectionOptions,
     TrajectoryModelSelectionResult,
+    TrajectoryRefinementOptions,
+    TrajectoryRefinementResult,
+    TrajectoryRefinementStep,
+    refine_trajectory_model,
     select_shared_trajectory_model,
     select_trajectory_model,
 )
@@ -25,6 +29,7 @@ from .trajectory import (
     SharedTrajectoryFitResult,
     TrajectoryFitOptions,
     TrajectoryFitResult,
+    TrajectoryFitSeed,
     fit_shared_trajectory_profile,
     fit_trajectory,
 )
@@ -41,9 +46,13 @@ __all__ = [
     "TrajectoryFamilyModel",
     "TrajectoryFitOptions",
     "TrajectoryFitResult",
+    "TrajectoryFitSeed",
     "TrajectoryModelCandidate",
     "TrajectoryModelSelectionOptions",
     "TrajectoryModelSelectionResult",
+    "TrajectoryRefinementOptions",
+    "TrajectoryRefinementResult",
+    "TrajectoryRefinementStep",
     "TrajectoryOccurrenceFit",
     "TrajectoryVariationPolicy",
     "fit_polyline_spline",
@@ -52,4 +61,5 @@ __all__ = [
     "fit_trajectory_family",
     "select_shared_trajectory_model",
     "select_trajectory_model",
+    "refine_trajectory_model",
 ]

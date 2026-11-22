@@ -110,6 +110,22 @@ class TrajectoryFitOptions:
 
 
 @dataclass(frozen=True)
+class TrajectoryFitSeed:
+    """Canonical trajectory profile and placement used to warm-start a fit."""
+
+    trajectory: Trajectory2D
+    transform: Similarity2D
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trajectory, Trajectory2D):
+            raise TypeError("trajectory must be a Trajectory2D")
+        if not np.isfinite(self.trajectory.length) or self.trajectory.length <= 0.0:
+            raise ValueError("trajectory length must be positive and finite")
+        if not isinstance(self.transform, Similarity2D):
+            raise TypeError("transform must be a Similarity2D")
+
+
+@dataclass(frozen=True)
 class TrajectoryFitResult:
     """Fitted trajectory profile, occurrence transform, and metrics."""
 
@@ -118,6 +134,8 @@ class TrajectoryFitResult:
     success: bool
     cost: float
     metrics: Mapping[str, float]
+
+    optimizer_evaluations: int = 0
 
 
 @dataclass(frozen=True)
@@ -335,7 +353,12 @@ def _profile_residuals(
     )
 
 
-def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> TrajectoryFitResult:
+def fit_trajectory(
+    points: ArrayLike,
+    options: TrajectoryFitOptions,
+    *,
+    initial: TrajectoryFitSeed | None = None,
+) -> TrajectoryFitResult:
     """Fit a normalized trajectory profile and a similarity placement to points.
 
     The fitted profile has length 1 and starting heading 0 degrees. Its
@@ -364,18 +387,26 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
         min_change_spacing=options.min_change_spacing,
         max_heading_rate_deg_per_u=options.max_heading_rate_deg_per_u,
     )
-    positions, rates = _initial_profile(target_points, target_heading, options)
-    profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
-    initial_trajectory = _trajectory_from(positions, rates)
-    initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
-    unit_end_length = float(np.linalg.norm(initial_xy[-1]))
-    initial_transform = Similarity2D(
-        scale=target_length / max(unit_end_length, 1e-9),
-        rotation_deg=float(target_heading[0]),
-        dx=float(target_points[0, 0]),
-        dy=float(target_points[0, 1]),
-    )
-    initial = np.concatenate(
+    if initial is None:
+        positions, rates = _initial_profile(target_points, target_heading, options)
+        profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
+        initial_trajectory = _trajectory_from(positions, rates)
+        initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
+        unit_end_length = float(np.linalg.norm(initial_xy[-1]))
+        initial_transform = Similarity2D(
+            scale=target_length / max(unit_end_length, 1e-9),
+            rotation_deg=float(target_heading[0]),
+            dx=float(target_points[0, 0]),
+            dy=float(target_points[0, 1]),
+        )
+    else:
+        if not isinstance(initial, TrajectoryFitSeed):
+            raise TypeError("initial must be a TrajectoryFitSeed")
+        if len(initial.trajectory.heading_rate.changes) != options.change_count:
+            raise ValueError("initial trajectory change count must match options.change_count")
+        profile_vector = codec.encode(initial.trajectory.heading_rate)
+        initial_transform = initial.transform
+    initial_values = np.concatenate(
         (
             profile_vector,
             [
@@ -410,15 +441,21 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
 
     rng = np.random.default_rng(options.seed)
     best = None
+    evaluation_count = 0
     for attempt in range(options.restarts + 1):
-        initial_values = initial if attempt == 0 else initial + rng.normal(0.0, 0.15, initial.shape)
+        attempt_initial = (
+            initial_values
+            if attempt == 0
+            else initial_values + rng.normal(0.0, 0.15, initial_values.shape)
+        )
         result = least_squares(
             residuals,
-            initial_values,
+            attempt_initial,
             loss="soft_l1",
             f_scale=options.robust_scale,
             max_nfev=options.max_nfev,
         )
+        evaluation_count += int(result.nfev)
         if best is None or result.cost < best.cost:
             best = result
 
@@ -429,6 +466,7 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
         success=bool(best.success),
         cost=float(best.cost),
         metrics=_metrics(trajectory, transform, target_points, target_heading),
+        optimizer_evaluations=evaluation_count,
     )
 
 

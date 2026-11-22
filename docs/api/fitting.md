@@ -4,7 +4,7 @@ Optional fitting utilities require SciPy. Install with `python -m pip install 'p
 
 ## Stable public fitting API
 
-The package exports `fit_polyline_spline()` with `PolylineSplineFitOptions`, `PolylineSplineFitResult`, `PolylineSplineFitDiagnostics`, and `PolylineSplineCandidateScore`, in addition to spline and trajectory fitting APIs such as `HeadingRateParameterization`, `TrajectoryFamilyModel`, `TrajectoryModelSelectionOptions`, and `fit_trajectory_family()`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
+The package exports `fit_polyline_spline()` with `PolylineSplineFitOptions`, `PolylineSplineFitResult`, `PolylineSplineFitDiagnostics`, and `PolylineSplineCandidateScore`, in addition to spline and trajectory APIs such as `HeadingRateParameterization`, `TrajectoryFamilyModel`, `TrajectoryModelSelectionOptions`, and `fit_trajectory_family()`. Progressive single-trajectory refinement adds `TrajectoryFitSeed`, `TrajectoryRefinementOptions`, `TrajectoryRefinementResult`, `TrajectoryRefinementStep`, and `refine_trajectory_model()`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
 
 ```{automodule} planarcurve.fitting
 :members:

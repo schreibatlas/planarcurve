@@ -17,6 +17,7 @@ from .trajectory import (
     evaluate_heading_rate,
     evaluate_trajectory,
     evaluate_trajectory_at,
+    insert_heading_rate_change,
     integrated_heading_rate,
     sample_trajectory_by_arclength,
     trajectory_end_pose,
@@ -31,7 +32,12 @@ from .trajectory_chain import (
     reverse_trajectory,
     trajectory_chain_to_cubic_path,
 )
-from .transforms import Affine2D, Similarity2D, fit_similarity_transform
+from .transforms import (
+    Affine2D,
+    Similarity2D,
+    fit_similarity_transform,
+    transform_cubic_path,
+)
 from .types import (
     CubicBezier,
     CubicPath,
@@ -67,6 +73,7 @@ __all__ = [
     "curvature",
     "evaluate_heading",
     "evaluate_heading_rate",
+    "insert_heading_rate_change",
     "evaluate_trajectory",
     "evaluate_trajectory_at",
     "integrated_heading_rate",
@@ -81,6 +88,7 @@ __all__ = [
     "reverse_trajectory",
     "trajectory_chain_to_cubic_path",
     "TrajectoryDescriptor",
+    "transform_cubic_path",
     "descriptor_distance",
     "reverse_descriptor",
     "trajectory_descriptor",

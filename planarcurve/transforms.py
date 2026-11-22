@@ -6,7 +6,7 @@ from math import cos, isfinite, radians, sin
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .types import FloatArray
+from .types import CubicPath, CubicSegment, FloatArray
 
 
 @dataclass(frozen=True)
@@ -165,6 +165,22 @@ class Similarity2D:
     def apply(self, points: ArrayLike) -> FloatArray:
         """Apply the similarity transform to one or more points."""
         return self.as_affine().apply(points)
+
+
+def transform_cubic_path(path: CubicPath, transform: Affine2D | Similarity2D) -> CubicPath:
+    """Return a cubic path with an affine or similarity transform applied."""
+    affine = transform.as_affine() if isinstance(transform, Similarity2D) else transform
+    return CubicPath(
+        start=affine.apply(path.start),
+        segments=tuple(
+            CubicSegment(
+                c1=affine.apply(segment.c1),
+                c2=affine.apply(segment.c2),
+                end=affine.apply(segment.end),
+            )
+            for segment in path.segments
+        ),
+    )
 
 
 def fit_similarity_transform(
