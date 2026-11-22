@@ -1,0 +1,1363 @@
+ docs/api/fitting.md                             |   2 +-
+ docs/api/trajectory.md                          |   3 +
+ docs/api/transforms.md                          |   3 +
+ docs/examples.md                                |   4 +-
+ docs/guides/fitting.md                          |  27 ++
+ examples/refine_trajectory_complexity.py        |  58 ++++
+ planarcurve/__init__.py                         |  10 +-
+ planarcurve/fitting/__init__.py                 |  10 +
+ planarcurve/fitting/model_selection.py          | 342 +++++++++++++++++++-
+ planarcurve/fitting/trajectory.py               |  68 +++-
+ planarcurve/trajectory.py                       |  25 ++
+ planarcurve/transforms.py                       |  18 +-
+ tests/test_examples.py                          |   1 +
+ tests/test_trajectory_progressive_refinement.py | 402 ++++++++++++++++++++++++
+ tests/test_transforms.py                        |  69 +++-
+ 15 files changed, 1021 insertions(+), 21 deletions(-)
+
+diff --git a/docs/api/fitting.md b/docs/api/fitting.md
+index e043150..f296ff4 100644
+--- a/docs/api/fitting.md
++++ b/docs/api/fitting.md
+@@ -4,7 +4,7 @@ Optional fitting utilities require SciPy. Install with `python -m pip install 'p
+ 
+ ## Stable public fitting API
+ 
+-The package exports `fit_polyline_spline()` with `PolylineSplineFitOptions`, `PolylineSplineFitResult`, `PolylineSplineFitDiagnostics`, and `PolylineSplineCandidateScore`, in addition to spline and trajectory fitting APIs such as `HeadingRateParameterization`, `TrajectoryFamilyModel`, `TrajectoryModelSelectionOptions`, and `fit_trajectory_family()`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
++The package exports `fit_polyline_spline()` with `PolylineSplineFitOptions`, `PolylineSplineFitResult`, `PolylineSplineFitDiagnostics`, and `PolylineSplineCandidateScore`, in addition to spline and trajectory APIs such as `HeadingRateParameterization`, `TrajectoryFamilyModel`, `TrajectoryModelSelectionOptions`, and `fit_trajectory_family()`. Progressive single-trajectory refinement adds `TrajectoryFitSeed`, `TrajectoryRefinementOptions`, `TrajectoryRefinementResult`, `TrajectoryRefinementStep`, and `refine_trajectory_model()`. These fitting APIs require SciPy. Install the optional extra with `python -m pip install 'planarcurve[fit]'`. Lower-level initialization helpers remain in their implementation modules.
+ 
+ ```{automodule} planarcurve.fitting
+ :members:
+diff --git a/docs/api/trajectory.md b/docs/api/trajectory.md
+index f9aa426..a0b7ad4 100644
+--- a/docs/api/trajectory.md
++++ b/docs/api/trajectory.md
+@@ -2,6 +2,9 @@
+ 
+ Normalized-progress heading-rate trajectories, exact reverse traversal, pose propagation, trajectory-chain sampling, and cubic-path approximation.
+ 
++
++`insert_heading_rate_change(profile, at)` returns a new profile with an evaluated rate knot at normalized progress `at`. It preserves the interpolation kind and is intended as a warm-start construction. Inserting a knot may change the cubic-Hermite interpolation away from the insertion point.
++
+ ```{automodule} planarcurve.trajectory
+ :members:
+ :undoc-members:
+diff --git a/docs/api/transforms.md b/docs/api/transforms.md
+index a049e6a..8c99779 100644
+--- a/docs/api/transforms.md
++++ b/docs/api/transforms.md
+@@ -5,6 +5,9 @@ Two-dimensional affine and positive-scale similarity transforms.
+ 
+ `fit_similarity_transform(target, source, *, weights=None)` maps source points onto target points. It fits a deterministic, orientation-preserving transform with positive scale, rotation, and translation. Reflections are not fitted. Optional finite, nonnegative point weights control each correspondence's contribution.
+ 
++
++`transform_cubic_path(path, transform)` returns a new path with its start and every cubic control/end point transformed. It accepts `Affine2D` and `Similarity2D`, preserves segment order, and leaves the input path unchanged.
++
+ ```{automodule} planarcurve.transforms
+ :members:
+ :undoc-members:
+diff --git a/docs/examples.md b/docs/examples.md
+index 6ba98fc..c6a9af6 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -1,6 +1,6 @@
+ # Examples
+ 
+-The repository includes eight synthetic, standalone demonstrations. They do not require Matplotlib, application-specific models, or local datasets. Install optional integrations once with `python -m pip install '.[all]'`, then run scripts from the repository root.
++The repository includes nine synthetic, standalone demonstrations. They do not require Matplotlib, application-specific models, or local datasets. Install optional integrations once with `python -m pip install '.[all]'`, then run scripts from the repository root.
+ 
+ | Script                                                                                                                              | Demonstrates                                                         | Extra    | Output                       |
+ | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------- | ---------------------------- |
+@@ -12,6 +12,7 @@ The repository includes eight synthetic, standalone demonstrations. They do not
+ | [`fit_shared_trajectory.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py)               | One normalized profile fitted to transformed occurrences             | `fit`    | `fit_shared_trajectory.svg`  |
+ | [`fit_shared_trajectory_family.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory_family.py) | Directed descriptors and shared family diagnostics                   | `fit`    | Console                      |
+ | [`select_trajectory_complexity.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/select_trajectory_complexity.py) | Deterministic model-order selection and decomposed scores            | `fit`    | Console                      |
++| [`refine_trajectory_complexity.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/refine_trajectory_complexity.py) | Warm-started progressive model order, score diagnostics, and smooth steering controls | `fit` | Console |
+ 
+ Run one example or all of them:
+ 
+@@ -24,6 +25,7 @@ python examples/fit_polyline_to_spline.py
+ python examples/fit_shared_trajectory.py
+ python examples/fit_shared_trajectory_family.py
+ python examples/select_trajectory_complexity.py
++python examples/refine_trajectory_complexity.py
+ ```
+ 
+ The scripts contain assertions for the behaviors they demonstrate. The SVG-producing examples write files to the current working directory. They are also used as sources for the task-oriented [guides](guides/index.md).
+diff --git a/docs/guides/fitting.md b/docs/guides/fitting.md
+index 1b711e2..cb4f7fd 100644
+--- a/docs/guides/fitting.md
++++ b/docs/guides/fitting.md
+@@ -49,8 +49,13 @@ from planarcurve.fitting import (
+     SharedTrajectoryFitResult,
+     TrajectoryFitOptions,
+     TrajectoryFitResult,
++    TrajectoryFitSeed,
++    TrajectoryRefinementOptions,
++    TrajectoryRefinementResult,
++    TrajectoryRefinementStep,
+     fit_shared_trajectory_profile,
+     fit_trajectory,
++    refine_trajectory_model,
+ )
+ ```
+ 
+@@ -109,8 +114,21 @@ Trajectory fitting represents shape canonically:
+ - its starting heading is 0 degrees;
+ - each observed occurrence gets a separate positive-scale `Similarity2D` transform.
+ 
++
++
+ This separates normalized shape from occurrence scale, rotation, and translation. `fit_trajectory()` estimates one profile and one transform. `fit_shared_trajectory_profile()` estimates one shared profile and one transform for each input occurrence.
+ 
++`TrajectoryFitSeed` warm-starts a single-curve fit from a canonical trajectory and its `Similarity2D` placement:
++
++```python
++from planarcurve.fitting import TrajectoryFitSeed, fit_trajectory
++
++seed = TrajectoryFitSeed(previous_fit.trajectory, previous_fit.transform)
++fit = fit_trajectory(points, options, initial=seed)
++```
++
++The seed's heading-rate change count must equal `options.change_count`. The seed is the first optimizer attempt; configured restarts still run around it. Passing `initial=None` retains the existing initialization behavior.
++
+ ### Residual units and weights
+ 
+ Position residuals are divided by the observed occurrence length. Heading residuals are divided by `heading_sigma_deg`; total-turn residuals by `turn_sigma_deg`; and second-difference heading-rate smoothness residuals by `smoothness_sigma_deg_per_u`. The configured weights are dimensionless multipliers on those normalized residual groups. Reported position metrics remain in the input coordinate units.
+@@ -137,3 +155,12 @@ Position residuals are divided by the observed occurrence length. Heading residu
+ The shared-profile result reports aggregate median and 95th-percentile position errors plus `max_total_turn_error_deg` across occurrences. A result object alone does not imply convergence. Callers should inspect `.success`, `.cost`, and the metrics.
+ 
+ The [shared trajectory example](https://github.com/schreibatlas/planarcurve/blob/main/examples/fit_shared_trajectory.py) synthesizes several scaled and rotated occurrences, fits one shared profile, and reports each placement transform.
++
++
++### Progressively refine model complexity
++
++`refine_trajectory_model()` requires `fit_options.change_count == 0`. It fits that base model, uses normalized position and heading residuals to propose legal smooth heading-rate knots, warm-starts child fits, and accepts the best child only when both its absolute and relative regularized-score gains meet their thresholds. The complexity term uses the same `parameter_count * complexity_weight * log1p(1 / parameter_precision)` formula as independent model selection.
++
++`TrajectoryRefinementResult.steps` includes the base fit and every proposed child. Each step reports fit and complexity costs, score, gain, acceptance, and a stable reason. `optimizer_evaluations` sums SciPy evaluations across all attempted fits. Change points are smooth steering controls, not geometric corners.
++
++Model complexity is the number of interior heading-rate changes. It is distinct from `samples`, which controls fit resampling density, and `residual_samples`, which controls the grid used to locate candidate changes. Increasing either sampling count does not force a more complex model. Run [`refine_trajectory_complexity.py`](https://github.com/schreibatlas/planarcurve/blob/main/examples/refine_trajectory_complexity.py) for a synthetic S-curve trace.
+diff --git a/examples/refine_trajectory_complexity.py b/examples/refine_trajectory_complexity.py
+new file mode 100644
+index 0000000..1cd4ab4
+--- /dev/null
++++ b/examples/refine_trajectory_complexity.py
+@@ -0,0 +1,58 @@
++"""Progressively refine a synthetic S-curve with smooth steering controls."""
++
++from __future__ import annotations
++
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryRefinementOptions,
++    refine_trajectory_model,
++)
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_trajectory,
++)
++
++
++def main() -> None:
++    source = Trajectory2D(
++        length=1.0,
++        start_heading_deg=0.0,
++        heading_rate=HeadingRateProfile(
++            270.0,
++            270.0,
++            changes=(HeadingRateChange(0.5, -270.0),),
++        ),
++    )
++    points = evaluate_trajectory(source, count=97).xy
++    result = refine_trajectory_model(
++        points,
++        fit_options=TrajectoryFitOptions(
++            change_count=0,
++            samples=32,
++            restarts=0,
++            max_nfev=100,
++        ),
++        refinement_options=TrajectoryRefinementOptions(
++            max_change_count=2,
++            candidate_insertions=3,
++            complexity_weight=0.001,
++        ),
++    )
++
++    print(f"changes=0 score={result.steps[0].score:.6f}")
++    for step in result.steps[1:]:
++        status = "accepted" if step.accepted else "rejected"
++        print(
++            f"try +1 at u={step.insertion_progress:.3f} "
++            f"score={step.score:.6f} {status} ({step.reason})"
++        )
++    print(f"selected_changes={result.selected_change_count}")
++    print(f"optimizer_evaluations={result.optimizer_evaluations}")
++    print("Change points are smooth steering controls, not geometric corners.")
++    assert result.selected_change_count == 1
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/planarcurve/__init__.py b/planarcurve/__init__.py
+index 6b19f68..528eda0 100644
+--- a/planarcurve/__init__.py
++++ b/planarcurve/__init__.py
+@@ -17,6 +17,7 @@ from .trajectory import (
+     evaluate_heading_rate,
+     evaluate_trajectory,
+     evaluate_trajectory_at,
++    insert_heading_rate_change,
+     integrated_heading_rate,
+     sample_trajectory_by_arclength,
+     trajectory_end_pose,
+@@ -31,7 +32,12 @@ from .trajectory_chain import (
+     reverse_trajectory,
+     trajectory_chain_to_cubic_path,
+ )
+-from .transforms import Affine2D, Similarity2D, fit_similarity_transform
++from .transforms import (
++    Affine2D,
++    Similarity2D,
++    fit_similarity_transform,
++    transform_cubic_path,
++)
+ from .types import (
+     CubicBezier,
+     CubicPath,
+@@ -67,6 +73,7 @@ __all__ = [
+     "curvature",
+     "evaluate_heading",
+     "evaluate_heading_rate",
++    "insert_heading_rate_change",
+     "evaluate_trajectory",
+     "evaluate_trajectory_at",
+     "integrated_heading_rate",
+@@ -81,6 +88,7 @@ __all__ = [
+     "reverse_trajectory",
+     "trajectory_chain_to_cubic_path",
+     "TrajectoryDescriptor",
++    "transform_cubic_path",
+     "descriptor_distance",
+     "reverse_descriptor",
+     "trajectory_descriptor",
+diff --git a/planarcurve/fitting/__init__.py b/planarcurve/fitting/__init__.py
+index cf5b68e..c920c19 100644
+--- a/planarcurve/fitting/__init__.py
++++ b/planarcurve/fitting/__init__.py
+@@ -9,6 +9,10 @@ from .model_selection import (
+     TrajectoryModelCandidate,
+     TrajectoryModelSelectionOptions,
+     TrajectoryModelSelectionResult,
++    TrajectoryRefinementOptions,
++    TrajectoryRefinementResult,
++    TrajectoryRefinementStep,
++    refine_trajectory_model,
+     select_shared_trajectory_model,
+     select_trajectory_model,
+ )
+@@ -25,6 +29,7 @@ from .trajectory import (
+     SharedTrajectoryFitResult,
+     TrajectoryFitOptions,
+     TrajectoryFitResult,
++    TrajectoryFitSeed,
+     fit_shared_trajectory_profile,
+     fit_trajectory,
+ )
+@@ -41,9 +46,13 @@ __all__ = [
+     "TrajectoryFamilyModel",
+     "TrajectoryFitOptions",
+     "TrajectoryFitResult",
++    "TrajectoryFitSeed",
+     "TrajectoryModelCandidate",
+     "TrajectoryModelSelectionOptions",
+     "TrajectoryModelSelectionResult",
++    "TrajectoryRefinementOptions",
++    "TrajectoryRefinementResult",
++    "TrajectoryRefinementStep",
+     "TrajectoryOccurrenceFit",
+     "TrajectoryVariationPolicy",
+     "fit_polyline_spline",
+@@ -52,4 +61,5 @@ __all__ = [
+     "fit_trajectory_family",
+     "select_shared_trajectory_model",
+     "select_trajectory_model",
++    "refine_trajectory_model",
+ ]
+diff --git a/planarcurve/fitting/model_selection.py b/planarcurve/fitting/model_selection.py
+index bbc8c08..1a62668 100644
+--- a/planarcurve/fitting/model_selection.py
++++ b/planarcurve/fitting/model_selection.py
+@@ -16,7 +16,7 @@ except ImportError as exc:  # pragma: no cover - optional fitting extra
+         "planarcurve.fitting.model_selection requires SciPy; install planarcurve[fit]"
+     ) from exc
+ 
+-from ..trajectory import Trajectory2D, evaluate_trajectory
++from ..trajectory import Trajectory2D, evaluate_trajectory, insert_heading_rate_change
+ from ..transforms import Similarity2D
+ from ..types import _require_integer
+ from .family import TrajectoryFamilyFitResult, fit_trajectory_family
+@@ -24,6 +24,9 @@ from .parameters import HeadingRateParameterization, decode_positive, encode_pos
+ from .trajectory import (
+     TrajectoryFitOptions,
+     TrajectoryFitResult,
++    TrajectoryFitSeed,
++    _heading_delta,
++    _mapped_state,
+     _profile_residuals,
+     _target_state,
+     fit_trajectory,
+@@ -63,6 +66,42 @@ class TrajectoryModelSelectionOptions:
+         object.__setattr__(self, "seed", _require_integer(self.seed, name="seed"))
+ 
+ 
++@dataclass(frozen=True)
++class TrajectoryRefinementOptions:
++    """Limits and score thresholds for progressive trajectory refinement."""
++
++    max_change_count: int = 4
++    candidate_insertions: int = 3
++    residual_samples: int = 96
++    minimum_absolute_gain: float = 1e-4
++    minimum_relative_gain: float = 0.01
++    complexity_weight: float = 0.01
++    parameter_precision: float = 1e-3
++    seed: int = 0
++
++    def __post_init__(self) -> None:
++        for name, minimum in (
++            ("max_change_count", 0),
++            ("candidate_insertions", 1),
++            ("residual_samples", 8),
++        ):
++            object.__setattr__(
++                self,
++                name,
++                _require_integer(getattr(self, name), name=name, minimum=minimum),
++            )
++        object.__setattr__(self, "seed", _require_integer(self.seed, name="seed"))
++        gains_and_weights = (
++            self.minimum_absolute_gain,
++            self.minimum_relative_gain,
++            self.complexity_weight,
++        )
++        if not all(isfinite(value) and value >= 0.0 for value in gains_and_weights):
++            raise ValueError("gains and complexity_weight must be finite and nonnegative")
++        if not isfinite(self.parameter_precision) or not 0.0 < self.parameter_precision <= 1.0:
++            raise ValueError("parameter_precision must lie in (0, 1]")
++
++
+ @dataclass(frozen=True)
+ class TrajectoryModelCandidate:
+     """One fitted model-order candidate and its regularized score."""
+@@ -82,6 +121,38 @@ class TrajectoryModelSelectionResult:
+     candidates: tuple[TrajectoryModelCandidate, ...]
+ 
+ 
++@dataclass(frozen=True)
++class TrajectoryRefinementStep:
++    """Numerical diagnostics for one baseline or proposed refinement fit."""
++
++    parent_change_count: int
++    candidate_change_count: int
++    insertion_progress: float | None
++    fit: TrajectoryFitResult
++    fit_cost: float
++    complexity_cost: float
++    score: float
++    absolute_gain: float | None
++    relative_gain: float | None
++    accepted: bool
++    reason: str
++
++
++@dataclass(frozen=True)
++class TrajectoryRefinementResult:
++    """Selected progressive fit, accepted model order, and all attempted steps."""
++
++    selected: TrajectoryFitResult
++    selected_change_count: int
++    steps: tuple[TrajectoryRefinementStep, ...]
++    stop_reason: str
++
++    @property
++    def optimizer_evaluations(self) -> int:
++        """Total SciPy function evaluations across the baseline and child fits."""
++        return sum(step.fit.optimizer_evaluations for step in self.steps)
++
++
+ def _split_indices(
+     count: int, options: TrajectoryModelSelectionOptions
+ ) -> tuple[np.ndarray, np.ndarray]:
+@@ -266,3 +337,272 @@ def select_trajectory_model(
+         selected_change_count=selected.change_count,
+         candidates=tuple(candidates),
+     )
++
++
++def _refinement_complexity_cost(
++    change_count: int,
++    fit_options: TrajectoryFitOptions,
++    refinement_options: TrajectoryRefinementOptions,
++) -> float:
++    parameterization = HeadingRateParameterization(
++        change_count=change_count,
++        min_change_spacing=fit_options.min_change_spacing,
++        max_heading_rate_deg_per_u=fit_options.max_heading_rate_deg_per_u,
++    )
++    factor = refinement_options.complexity_weight * log1p(
++        1.0 / refinement_options.parameter_precision
++    )
++    return factor * (parameterization.size + 4)
++
++
++def _residual_insertion_candidates(
++    signal: np.ndarray,
++    grid: np.ndarray,
++    existing_changes: Sequence[float],
++    *,
++    min_spacing: float,
++    limit: int,
++) -> tuple[float, ...]:
++    legal = (
++        (grid > 0.0)
++        & (grid < 1.0)
++        & (grid >= min_spacing - 1e-12)
++        & (grid <= 1.0 - min_spacing + 1e-12)
++    )
++    for existing in existing_changes:
++        distances = np.abs(grid - existing)
++        legal &= (distances >= min_spacing - 1e-12) & (distances > 1e-12)
++    legal_indices = np.flatnonzero(legal)
++    if legal_indices.size == 0:
++        return ()
++
++    peaks = []
++    for index in legal_indices:
++        left_is_legal = index > 0 and legal[index - 1]
++        right_is_legal = index + 1 < len(grid) and legal[index + 1]
++        left_is_peak = not left_is_legal or signal[index] >= signal[index - 1]
++        right_is_peak = not right_is_legal or signal[index] >= signal[index + 1]
++        if left_is_peak and right_is_peak:
++            peaks.append(int(index))
++
++    peaks.sort(key=lambda index: (-float(signal[index]), float(grid[index])))
++    suppression_distance = max(min_spacing, float(grid[1] - grid[0]))
++    selected = []
++    for index in peaks:
++        if all(
++            abs(float(grid[index] - grid[previous])) >= suppression_distance - 1e-12
++            for previous in selected
++        ):
++            selected.append(index)
++            if len(selected) == limit:
++                break
++    return tuple(float(grid[index]) for index in selected)
++
++
++def _better_refinement_candidate(
++    candidate: tuple[int, int, TrajectoryRefinementStep],
++    current: tuple[int, int, TrajectoryRefinementStep],
++) -> bool:
++    candidate_order, _, candidate_step = candidate
++    current_order, _, current_step = current
++    if not np.isclose(candidate_step.score, current_step.score, rtol=1e-12, atol=1e-12):
++        return candidate_step.score < current_step.score
++    candidate_key = (
++        candidate_step.candidate_change_count,
++        candidate_step.fit_cost,
++        float(candidate_step.insertion_progress),
++        candidate_order,
++    )
++    current_key = (
++        current_step.candidate_change_count,
++        current_step.fit_cost,
++        float(current_step.insertion_progress),
++        current_order,
++    )
++    return candidate_key < current_key
++
++
++def refine_trajectory_model(
++    points: ArrayLike,
++    *,
++    fit_options: TrajectoryFitOptions,
++    refinement_options: TrajectoryRefinementOptions = TrajectoryRefinementOptions(),
++) -> TrajectoryRefinementResult:
++    """Progressively add heading-rate changes when regularized gains justify them.
++
++    ``fit_options.change_count`` must be zero. Complexity uses the same parameter
++    count and precision penalty as :func:`select_trajectory_model`.
++    """
++    if not isinstance(fit_options, TrajectoryFitOptions):
++        raise TypeError("fit_options must be TrajectoryFitOptions")
++    if not isinstance(refinement_options, TrajectoryRefinementOptions):
++        raise TypeError("refinement_options must be TrajectoryRefinementOptions")
++    if fit_options.change_count != 0:
++        raise ValueError("fit_options.change_count must be zero for progressive refinement")
++
++    base_options = replace(fit_options, seed=refinement_options.seed)
++    selected = fit_trajectory(points, base_options)
++    selected_score = selected.cost + _refinement_complexity_cost(
++        0, base_options, refinement_options
++    )
++    base_valid = isfinite(selected.cost) and isfinite(selected_score)
++    base_accepted = selected.success and base_valid
++    base_reason = (
++        "base_model"
++        if base_accepted
++        else "base_fit_failed"
++        if not selected.success
++        else "numerical_failure"
++    )
++    steps = [
++        TrajectoryRefinementStep(
++            parent_change_count=0,
++            candidate_change_count=0,
++            insertion_progress=None,
++            fit=selected,
++            fit_cost=float(selected.cost),
++            complexity_cost=_refinement_complexity_cost(0, base_options, refinement_options),
++            score=float(selected_score),
++            absolute_gain=None,
++            relative_gain=None,
++            accepted=base_accepted,
++            reason=base_reason,
++        )
++    ]
++    if not selected.success:
++        return TrajectoryRefinementResult(selected, 0, tuple(steps), "base_fit_failed")
++    if not base_valid:
++        return TrajectoryRefinementResult(selected, 0, tuple(steps), "numerical_failure")
++    if refinement_options.max_change_count == 0:
++        return TrajectoryRefinementResult(selected, 0, tuple(steps), "max_change_count_reached")
++
++    residual_options = replace(base_options, samples=refinement_options.residual_samples)
++    grid = np.linspace(0.0, 1.0, refinement_options.residual_samples)
++    while True:
++        target_points, target_heading, target_length = _target_state(points, residual_options)
++        mapped_points, fitted_heading = _mapped_state(
++            selected.trajectory, selected.transform, refinement_options.residual_samples
++        )
++        position_error = np.linalg.norm(mapped_points - target_points, axis=1) / max(
++            target_length, np.finfo(float).eps
++        )
++        heading_error = np.abs(_heading_delta(fitted_heading, target_heading)) / 180.0
++        signal = position_error + heading_error
++        existing_changes = tuple(change.at for change in selected.trajectory.heading_rate.changes)
++        if not np.isfinite(signal).all():
++            return TrajectoryRefinementResult(
++                selected,
++                len(existing_changes),
++                tuple(steps),
++                "numerical_failure",
++            )
++        locations = _residual_insertion_candidates(
++            signal,
++            grid,
++            existing_changes,
++            min_spacing=base_options.min_change_spacing,
++            limit=refinement_options.candidate_insertions,
++        )
++        if not locations:
++            return TrajectoryRefinementResult(
++                selected, len(existing_changes), tuple(steps), "no_legal_insertion_location"
++            )
++
++        candidate_records: list[tuple[int, int, TrajectoryRefinementStep]] = []
++        candidate_change_count = len(existing_changes) + 1
++        candidate_options = replace(
++            base_options,
++            change_count=candidate_change_count,
++            seed=refinement_options.seed,
++        )
++        for candidate_order, location in enumerate(locations):
++            promoted_profile = insert_heading_rate_change(
++                selected.trajectory.heading_rate, location
++            )
++            promoted_trajectory = Trajectory2D(
++                length=1.0,
++                start_heading_deg=0.0,
++                heading_rate=promoted_profile,
++            )
++            fit = fit_trajectory(
++                points,
++                candidate_options,
++                initial=TrajectoryFitSeed(promoted_trajectory, selected.transform),
++            )
++            fit_cost = float(fit.cost)
++            complexity_cost = _refinement_complexity_cost(
++                candidate_change_count, candidate_options, refinement_options
++            )
++            score = fit_cost + complexity_cost
++            valid_score = isfinite(fit_cost) and isfinite(score)
++            absolute_gain = selected_score - score if valid_score else None
++            relative_gain = (
++                absolute_gain / max(abs(selected_score), np.finfo(float).eps)
++                if absolute_gain is not None
++                else None
++            )
++            reason = (
++                "fit_failed"
++                if not fit.success
++                else "numerical_failure"
++                if not valid_score
++                else "not_best_candidate"
++            )
++            step = TrajectoryRefinementStep(
++                parent_change_count=len(existing_changes),
++                candidate_change_count=candidate_change_count,
++                insertion_progress=location,
++                fit=fit,
++                fit_cost=fit_cost,
++                complexity_cost=complexity_cost,
++                score=float(score),
++                absolute_gain=absolute_gain,
++                relative_gain=relative_gain,
++                accepted=False,
++                reason=reason,
++            )
++            steps.append(step)
++            if fit.success and valid_score:
++                candidate_records.append((candidate_order, len(steps) - 1, step))
++
++        if not candidate_records:
++            stop_reason = (
++                "numerical_failure"
++                if any(step.fit.success for step in steps[-len(locations) :])
++                else "all_child_fits_failed"
++            )
++            return TrajectoryRefinementResult(
++                selected, len(existing_changes), tuple(steps), stop_reason
++            )
++
++        best = candidate_records[0]
++        for candidate in candidate_records[1:]:
++            if _better_refinement_candidate(candidate, best):
++                best = candidate
++        best_order, best_step_index, best_step = best
++        del best_order
++        gain_accepted = (
++            best_step.absolute_gain is not None
++            and best_step.relative_gain is not None
++            and best_step.absolute_gain >= refinement_options.minimum_absolute_gain
++            and best_step.relative_gain >= refinement_options.minimum_relative_gain
++        )
++        for index, step in enumerate(steps[-len(locations) :], start=len(steps) - len(locations)):
++            if index == best_step_index:
++                steps[index] = replace(
++                    step,
++                    accepted=gain_accepted,
++                    reason=("accepted" if gain_accepted else "insufficient_gain"),
++                )
++
++        if not gain_accepted:
++            return TrajectoryRefinementResult(
++                selected, len(existing_changes), tuple(steps), "insufficient_gain"
++            )
++
++        selected = best_step.fit
++        selected_score = best_step.score
++        if candidate_change_count >= refinement_options.max_change_count:
++            return TrajectoryRefinementResult(
++                selected, candidate_change_count, tuple(steps), "max_change_count_reached"
++            )
+diff --git a/planarcurve/fitting/trajectory.py b/planarcurve/fitting/trajectory.py
+index c62b4e2..00506ea 100644
+--- a/planarcurve/fitting/trajectory.py
++++ b/planarcurve/fitting/trajectory.py
+@@ -109,6 +109,22 @@ class TrajectoryFitOptions:
+             raise ValueError("robust_scale must be positive and finite")
+ 
+ 
++@dataclass(frozen=True)
++class TrajectoryFitSeed:
++    """Canonical trajectory profile and placement used to warm-start a fit."""
++
++    trajectory: Trajectory2D
++    transform: Similarity2D
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.trajectory, Trajectory2D):
++            raise TypeError("trajectory must be a Trajectory2D")
++        if not np.isfinite(self.trajectory.length) or self.trajectory.length <= 0.0:
++            raise ValueError("trajectory length must be positive and finite")
++        if not isinstance(self.transform, Similarity2D):
++            raise TypeError("transform must be a Similarity2D")
++
++
+ @dataclass(frozen=True)
+ class TrajectoryFitResult:
+     """Fitted trajectory profile, occurrence transform, and metrics."""
+@@ -119,6 +135,8 @@ class TrajectoryFitResult:
+     cost: float
+     metrics: Mapping[str, float]
+ 
++    optimizer_evaluations: int = 0
++
+ 
+ @dataclass(frozen=True)
+ class SharedTrajectoryFitResult:
+@@ -335,7 +353,12 @@ def _profile_residuals(
+     )
+ 
+ 
+-def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> TrajectoryFitResult:
++def fit_trajectory(
++    points: ArrayLike,
++    options: TrajectoryFitOptions,
++    *,
++    initial: TrajectoryFitSeed | None = None,
++) -> TrajectoryFitResult:
+     """Fit a normalized trajectory profile and a similarity placement to points.
+ 
+     The fitted profile has length 1 and starting heading 0 degrees. Its
+@@ -364,18 +387,26 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
+         min_change_spacing=options.min_change_spacing,
+         max_heading_rate_deg_per_u=options.max_heading_rate_deg_per_u,
+     )
+-    positions, rates = _initial_profile(target_points, target_heading, options)
+-    profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
+-    initial_trajectory = _trajectory_from(positions, rates)
+-    initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
+-    unit_end_length = float(np.linalg.norm(initial_xy[-1]))
+-    initial_transform = Similarity2D(
+-        scale=target_length / max(unit_end_length, 1e-9),
+-        rotation_deg=float(target_heading[0]),
+-        dx=float(target_points[0, 0]),
+-        dy=float(target_points[0, 1]),
+-    )
+-    initial = np.concatenate(
++    if initial is None:
++        positions, rates = _initial_profile(target_points, target_heading, options)
++        profile_vector = codec.encode(_trajectory_from(positions, rates).heading_rate)
++        initial_trajectory = _trajectory_from(positions, rates)
++        initial_xy, _ = matched_trajectory_state(initial_trajectory, options.samples)
++        unit_end_length = float(np.linalg.norm(initial_xy[-1]))
++        initial_transform = Similarity2D(
++            scale=target_length / max(unit_end_length, 1e-9),
++            rotation_deg=float(target_heading[0]),
++            dx=float(target_points[0, 0]),
++            dy=float(target_points[0, 1]),
++        )
++    else:
++        if not isinstance(initial, TrajectoryFitSeed):
++            raise TypeError("initial must be a TrajectoryFitSeed")
++        if len(initial.trajectory.heading_rate.changes) != options.change_count:
++            raise ValueError("initial trajectory change count must match options.change_count")
++        profile_vector = codec.encode(initial.trajectory.heading_rate)
++        initial_transform = initial.transform
++    initial_values = np.concatenate(
+         (
+             profile_vector,
+             [
+@@ -410,15 +441,21 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
+ 
+     rng = np.random.default_rng(options.seed)
+     best = None
++    evaluation_count = 0
+     for attempt in range(options.restarts + 1):
+-        initial_values = initial if attempt == 0 else initial + rng.normal(0.0, 0.15, initial.shape)
++        attempt_initial = (
++            initial_values
++            if attempt == 0
++            else initial_values + rng.normal(0.0, 0.15, initial_values.shape)
++        )
+         result = least_squares(
+             residuals,
+-            initial_values,
++            attempt_initial,
+             loss="soft_l1",
+             f_scale=options.robust_scale,
+             max_nfev=options.max_nfev,
+         )
++        evaluation_count += int(result.nfev)
+         if best is None or result.cost < best.cost:
+             best = result
+ 
+@@ -429,6 +466,7 @@ def fit_trajectory(points: ArrayLike, options: TrajectoryFitOptions) -> Trajecto
+         success=bool(best.success),
+         cost=float(best.cost),
+         metrics=_metrics(trajectory, transform, target_points, target_heading),
++        optimizer_evaluations=evaluation_count,
+     )
+ 
+ 
+diff --git a/planarcurve/trajectory.py b/planarcurve/trajectory.py
+index 49055a5..a485506 100644
+--- a/planarcurve/trajectory.py
++++ b/planarcurve/trajectory.py
+@@ -224,6 +224,31 @@ def evaluate_heading_rate(profile: HeadingRateProfile, u: ArrayLike) -> FloatArr
+     )
+ 
+ 
++def insert_heading_rate_change(profile: HeadingRateProfile, at: float) -> HeadingRateProfile:
++    """Return a warm-start profile with a new knot at normalized progress ``at``.
++
++    The new rate matches the original profile at the insertion point. Recomputing
++    cubic-Hermite slopes can change the interpolated profile elsewhere, so this is
++    a warm-start construction rather than an exactly equivalent representation.
++    """
++    position = float(at)
++    if not isfinite(position) or not 0.0 < position < 1.0:
++        raise ValueError("insertion progress must lie strictly inside (0, 1)")
++    if any(change.at == position for change in profile.changes):
++        raise ValueError("insertion progress duplicates an existing change location")
++    new_change = HeadingRateChange(
++        at=position,
++        heading_rate_deg_per_u=float(evaluate_heading_rate(profile, np.array([position]))[0]),
++    )
++    changes = tuple(sorted((*profile.changes, new_change), key=lambda change: change.at))
++    return HeadingRateProfile(
++        start_rate_deg_per_u=profile.start_rate_deg_per_u,
++        changes=changes,
++        end_rate_deg_per_u=profile.end_rate_deg_per_u,
++        interpolation=profile.interpolation,
++    )
++
++
+ def integrated_heading_rate(profile: HeadingRateProfile, u: ArrayLike) -> FloatArray:
+     """Return the exact integral of heading rate from zero to each ``u`` value."""
+     values = _validated_parameters(u)
+diff --git a/planarcurve/transforms.py b/planarcurve/transforms.py
+index 32f3f34..1634281 100644
+--- a/planarcurve/transforms.py
++++ b/planarcurve/transforms.py
+@@ -6,7 +6,7 @@ from math import cos, isfinite, radians, sin
+ import numpy as np
+ from numpy.typing import ArrayLike
+ 
+-from .types import FloatArray
++from .types import CubicPath, CubicSegment, FloatArray
+ 
+ 
+ @dataclass(frozen=True)
+@@ -167,6 +167,22 @@ class Similarity2D:
+         return self.as_affine().apply(points)
+ 
+ 
++def transform_cubic_path(path: CubicPath, transform: Affine2D | Similarity2D) -> CubicPath:
++    """Return a cubic path with an affine or similarity transform applied."""
++    affine = transform.as_affine() if isinstance(transform, Similarity2D) else transform
++    return CubicPath(
++        start=affine.apply(path.start),
++        segments=tuple(
++            CubicSegment(
++                c1=affine.apply(segment.c1),
++                c2=affine.apply(segment.c2),
++                end=affine.apply(segment.end),
++            )
++            for segment in path.segments
++        ),
++    )
++
++
+ def fit_similarity_transform(
+     target: ArrayLike,
+     source: ArrayLike,
+diff --git a/tests/test_examples.py b/tests/test_examples.py
+index b0ece88..7100000 100644
+--- a/tests/test_examples.py
++++ b/tests/test_examples.py
+@@ -14,6 +14,7 @@ EXAMPLES = (
+     ("svg_pipeline.py", None),
+     ("fit_polyline_to_spline.py", "fit_polyline_to_spline.svg"),
+     ("fit_shared_trajectory.py", "fit_shared_trajectory.svg"),
++    ("refine_trajectory_complexity.py", None),
+ )
+ 
+ 
+diff --git a/tests/test_trajectory_progressive_refinement.py b/tests/test_trajectory_progressive_refinement.py
+new file mode 100644
+index 0000000..43c5d54
+--- /dev/null
++++ b/tests/test_trajectory_progressive_refinement.py
+@@ -0,0 +1,402 @@
++from __future__ import annotations
++
++import importlib
++from types import SimpleNamespace
++
++import numpy as np
++import pytest
++
++from planarcurve import insert_heading_rate_change
++from planarcurve.fitting import (
++    TrajectoryFitOptions,
++    TrajectoryFitSeed,
++    TrajectoryRefinementOptions,
++    fit_trajectory,
++    refine_trajectory_model,
++)
++from planarcurve.trajectory import (
++    HeadingRateChange,
++    HeadingRateProfile,
++    Trajectory2D,
++    evaluate_heading_rate,
++    evaluate_trajectory,
++)
++from planarcurve.transforms import Similarity2D
++
++
++def _seed() -> TrajectoryFitSeed:
++    trajectory = Trajectory2D(
++        length=1.0,
++        start_heading_deg=0.0,
++        heading_rate=HeadingRateProfile(0.0, 0.0),
++    )
++    return TrajectoryFitSeed(trajectory, Similarity2D())
++
++
++def test_zero_change_profile_promotes_at_half_progress():
++    profile = HeadingRateProfile(10.0, 30.0)
++
++    promoted = insert_heading_rate_change(profile, 0.5)
++
++    assert len(promoted.changes) == 1
++    assert promoted.changes[0].at == 0.5
++    assert promoted.changes[0].heading_rate_deg_per_u == pytest.approx(20.0)
++    assert promoted.interpolation == profile.interpolation
++
++
++def test_profile_insertion_preserves_interpolation_and_original_profile():
++    profile = HeadingRateProfile(
++        start_rate_deg_per_u=20.0,
++        changes=(HeadingRateChange(0.75, 80.0),),
++        end_rate_deg_per_u=-10.0,
++        interpolation="linear",
++    )
++    original_changes = profile.changes
++    expected_rate = evaluate_heading_rate(profile, np.array([0.4]))[0]
++
++    promoted = insert_heading_rate_change(profile, 0.4)
++
++    assert [change.at for change in promoted.changes] == [0.4, 0.75]
++    assert promoted.changes[0].heading_rate_deg_per_u == pytest.approx(expected_rate)
++    assert promoted.interpolation == profile.interpolation
++    assert profile.changes == original_changes
++
++
++def test_profile_insertion_rejects_invalid_or_duplicate_locations():
++    profile = HeadingRateProfile(
++        0.0,
++        0.0,
++        changes=(HeadingRateChange(0.5, 10.0),),
++    )
++    for at in (0.0, 1.0, -0.1, 1.1, np.nan):
++        with pytest.raises(ValueError, match="strictly inside"):
++            insert_heading_rate_change(profile, at)
++    with pytest.raises(ValueError, match="duplicates"):
++        insert_heading_rate_change(profile, 0.5)
++
++
++def test_fit_trajectory_default_and_explicit_none_are_identical():
++    points = np.column_stack((np.linspace(0.0, 1.0, 17), np.zeros(17)))
++    options = TrajectoryFitOptions(change_count=0, samples=16, restarts=0, max_nfev=30)
++
++    default = fit_trajectory(points, options)
++    explicit_none = fit_trajectory(points, options, initial=None)
++
++    assert explicit_none == default
++    assert default.optimizer_evaluations > 0
++
++
++def test_fit_trajectory_accepts_a_valid_warm_seed():
++    points = np.column_stack((np.linspace(0.0, 1.0, 17), np.zeros(17)))
++    options = TrajectoryFitOptions(change_count=0, samples=16, restarts=0, max_nfev=30)
++
++    result = fit_trajectory(points, options, initial=_seed())
++
++    assert result.success
++    assert result.optimizer_evaluations > 0
++
++
++def test_fit_trajectory_rejects_seed_topology_mismatch():
++    points = np.column_stack((np.linspace(0.0, 1.0, 17), np.zeros(17)))
++    options = TrajectoryFitOptions(change_count=1, samples=16, restarts=0, max_nfev=30)
++
++    with pytest.raises(ValueError, match="change count"):
++        fit_trajectory(points, options, initial=_seed())
++
++
++def test_warm_seed_is_attempt_zero_and_restarts_can_improve(monkeypatch):
++    module = importlib.import_module("planarcurve.fitting.trajectory")
++    points = np.column_stack((np.linspace(0.0, 1.0, 17), np.zeros(17)))
++    options = TrajectoryFitOptions(change_count=0, samples=16, restarts=1, seed=7)
++    seed = _seed()
++    calls = []
++
++    def fake_least_squares(_residuals, initial_values, **_kwargs):
++        values = np.asarray(initial_values).copy()
++        calls.append(values)
++        index = len(calls) - 1
++        return SimpleNamespace(
++            x=values,
++            cost=float(10 - index),
++            success=True,
++            nfev=index + 1,
++        )
++
++    monkeypatch.setattr(module, "least_squares", fake_least_squares)
++    result = fit_trajectory(points, options, initial=seed)
++
++    assert len(calls) == 2
++    np.testing.assert_allclose(calls[0], 0.0)
++    assert not np.array_equal(calls[0], calls[1])
++    assert result.cost == 9.0
++    assert result.optimizer_evaluations == 3
++
++
++def _points_for_profile(profile: HeadingRateProfile) -> np.ndarray:
++    trajectory = Trajectory2D(1.0, 0.0, profile)
++    return evaluate_trajectory(trajectory, count=65).xy
++
++
++def _s_curve_points() -> np.ndarray:
++    return _points_for_profile(
++        HeadingRateProfile(
++            270.0,
++            270.0,
++            changes=(HeadingRateChange(0.5, -270.0),),
++        )
++    )
++
++
++def _two_regime_points() -> np.ndarray:
++    return _points_for_profile(
++        HeadingRateProfile(
++            240.0,
++            240.0,
++            changes=(
++                HeadingRateChange(0.33, -240.0),
++                HeadingRateChange(0.67, 240.0),
++            ),
++        )
++    )
++
++
++def _refinement_fit_options(*, min_change_spacing: float = 0.05) -> TrajectoryFitOptions:
++    return TrajectoryFitOptions(
++        change_count=0,
++        samples=32,
++        restarts=0,
++        min_change_spacing=min_change_spacing,
++        max_nfev=100,
++    )
++
++
++@pytest.mark.parametrize(
++    ("profile", "expected_changes"),
++    [
++        (HeadingRateProfile(0.0, 0.0), 0),
++        (HeadingRateProfile(90.0, 90.0), 0),
++    ],
++)
++def test_refinement_keeps_straight_and_constant_turn_trajectories_simple(
++    profile: HeadingRateProfile, expected_changes: int
++):
++    result = refine_trajectory_model(
++        _points_for_profile(profile),
++        fit_options=_refinement_fit_options(),
++        refinement_options=TrajectoryRefinementOptions(max_change_count=2),
++    )
++
++    assert result.selected_change_count == expected_changes
++    assert result.steps[0].accepted
++    assert result.stop_reason in {"insufficient_gain", "max_change_count_reached"}
++
++
++def test_refinement_promotes_an_s_curve_from_zero_changes():
++    result = refine_trajectory_model(
++        _s_curve_points(),
++        fit_options=_refinement_fit_options(),
++        refinement_options=TrajectoryRefinementOptions(
++            max_change_count=1,
++            candidate_insertions=3,
++            complexity_weight=0.001,
++        ),
++    )
++
++    assert result.selected_change_count == 1
++    assert any(step.accepted and step.candidate_change_count == 1 for step in result.steps)
++    assert result.stop_reason == "max_change_count_reached"
++
++
++def test_refinement_can_reach_two_separated_steering_regimes():
++    result = refine_trajectory_model(
++        _two_regime_points(),
++        fit_options=_refinement_fit_options(),
++        refinement_options=TrajectoryRefinementOptions(
++            max_change_count=2,
++            candidate_insertions=4,
++            residual_samples=64,
++            minimum_absolute_gain=1e-5,
++            minimum_relative_gain=0.001,
++            complexity_weight=0.0001,
++        ),
++    )
++
++    assert result.selected_change_count == 2
++    accepted_counts = [step.candidate_change_count for step in result.steps if step.accepted]
++    assert accepted_counts == [0, 1, 2]
++
++
++def test_complexity_penalty_stops_earlier_and_maximum_does_not_force_changes():
++    points = _s_curve_points()
++    fit_options = _refinement_fit_options()
++    low_penalty = refine_trajectory_model(
++        points,
++        fit_options=fit_options,
++        refinement_options=TrajectoryRefinementOptions(
++            max_change_count=3,
++            complexity_weight=0.001,
++        ),
++    )
++    high_penalty = refine_trajectory_model(
++        points,
++        fit_options=fit_options,
++        refinement_options=TrajectoryRefinementOptions(
++            max_change_count=3,
++            complexity_weight=1.0,
++        ),
++    )
++    line = np.column_stack((np.linspace(0.0, 1.0, 65), np.zeros(65)))
++    short_limit = refine_trajectory_model(
++        line,
++        fit_options=fit_options,
++        refinement_options=TrajectoryRefinementOptions(max_change_count=1),
++    )
++    long_limit = refine_trajectory_model(
++        line,
++        fit_options=fit_options,
++        refinement_options=TrajectoryRefinementOptions(max_change_count=4),
++    )
++
++    assert low_penalty.selected_change_count > high_penalty.selected_change_count
++    assert short_limit.selected_change_count == long_limit.selected_change_count == 0
++
++
++def test_refinement_is_deterministic_and_accepted_steps_improve_score():
++    points = _s_curve_points()
++    options = TrajectoryRefinementOptions(
++        max_change_count=2,
++        complexity_weight=0.001,
++        seed=17,
++    )
++    fit_options = _refinement_fit_options()
++    first = refine_trajectory_model(points, fit_options=fit_options, refinement_options=options)
++    second = refine_trajectory_model(points, fit_options=fit_options, refinement_options=options)
++
++    assert first == second
++    assert first.stop_reason == second.stop_reason
++    assert first.stop_reason
++    accepted = [step for step in first.steps if step.accepted and step.candidate_change_count > 0]
++    assert accepted
++    assert all(step.absolute_gain > 0.0 for step in accepted)
++    assert all(step.relative_gain > 0.0 for step in accepted)
++
++
++def test_refinement_rejects_nonzero_start_order_and_reports_no_legal_locations():
++    points = np.column_stack((np.linspace(0.0, 1.0, 65), np.zeros(65)))
++    with pytest.raises(ValueError, match="change_count must be zero"):
++        refine_trajectory_model(
++            points,
++            fit_options=TrajectoryFitOptions(change_count=1),
++        )
++
++    result = refine_trajectory_model(
++        points,
++        fit_options=_refinement_fit_options(min_change_spacing=0.6),
++        refinement_options=TrajectoryRefinementOptions(max_change_count=1),
++    )
++    assert result.selected_change_count == 0
++    assert result.stop_reason == "no_legal_insertion_location"
++
++
++def test_nonfinite_residual_signal_stops_as_numerical_failure(monkeypatch):
++    module = importlib.import_module("planarcurve.fitting.model_selection")
++    points = _s_curve_points()
++    monkeypatch.setattr(
++        module,
++        "_mapped_state",
++        lambda _trajectory, _transform, samples: (
++            np.full((samples, 2), np.nan),
++            np.zeros(samples),
++        ),
++    )
++
++    result = refine_trajectory_model(
++        points,
++        fit_options=_refinement_fit_options(),
++        refinement_options=TrajectoryRefinementOptions(max_change_count=1),
++    )
++
++    assert result.selected_change_count == 0
++    assert result.stop_reason == "numerical_failure"
++
++
++def test_candidate_insertions_exclude_endpoints_and_duplicate_knots_at_zero_spacing():
++    from planarcurve.fitting.model_selection import _residual_insertion_candidates
++
++    grid = np.linspace(0.0, 1.0, 11)
++    signal = np.zeros_like(grid)
++    signal[[0, 5, 10]] = [10.0, 20.0, 9.0]
++    locations = _residual_insertion_candidates(
++        signal,
++        grid,
++        (0.5,),
++        min_spacing=0.0,
++        limit=3,
++    )
++
++    assert locations
++    assert all(0.0 < location < 1.0 for location in locations)
++    assert 0.5 not in locations
++
++
++def test_candidate_insertions_respect_spacing_and_nonmaximum_suppression():
++    from planarcurve.fitting.model_selection import _residual_insertion_candidates
++
++    grid = np.linspace(0.0, 1.0, 21)
++    signal = np.zeros_like(grid)
++    signal[[4, 5, 6, 15, 16]] = [2.0, 5.0, 3.0, 4.0, 3.0]
++    locations = _residual_insertion_candidates(
++        signal,
++        grid,
++        (0.5,),
++        min_spacing=0.15,
++        limit=4,
++    )
++
++    assert locations
++    assert all(0.15 <= location <= 0.85 for location in locations)
++    assert all(abs(location - 0.5) >= 0.15 for location in locations)
++    assert all(
++        abs(left - right) >= 0.15
++        for index, left in enumerate(locations)
++        for right in locations[index + 1 :]
++    )
++
++
++def test_refinement_evaluation_count_is_reported_and_bounded():
++    fit_options = _refinement_fit_options()
++    refinement_options = TrajectoryRefinementOptions(
++        max_change_count=3,
++        candidate_insertions=2,
++        complexity_weight=0.001,
++    )
++    result = refine_trajectory_model(
++        _s_curve_points(),
++        fit_options=fit_options,
++        refinement_options=refinement_options,
++    )
++    maximum_fits = 1 + refinement_options.max_change_count * refinement_options.candidate_insertions
++    evaluation_bound = maximum_fits * (fit_options.restarts + 1) * fit_options.max_nfev
++
++    assert result.optimizer_evaluations == sum(
++        step.fit.optimizer_evaluations for step in result.steps
++    )
++    assert 0 < result.optimizer_evaluations <= evaluation_bound
++
++
++@pytest.mark.parametrize(
++    "kwargs",
++    [
++        {"max_change_count": -1},
++        {"candidate_insertions": 0},
++        {"residual_samples": 7},
++        {"minimum_absolute_gain": -1.0},
++        {"minimum_relative_gain": np.inf},
++        {"complexity_weight": -1.0},
++        {"parameter_precision": 0.0},
++        {"parameter_precision": 1.1},
++    ],
++)
++def test_refinement_options_reject_invalid_values(kwargs):
++    with pytest.raises(ValueError):
++        TrajectoryRefinementOptions(**kwargs)
+diff --git a/tests/test_transforms.py b/tests/test_transforms.py
+index 2b2624b..4a51c26 100644
+--- a/tests/test_transforms.py
++++ b/tests/test_transforms.py
+@@ -3,7 +3,13 @@ from __future__ import annotations
+ import numpy as np
+ import pytest
+ 
+-from planarcurve.transforms import Affine2D, Similarity2D, fit_similarity_transform
++from planarcurve.transforms import (
++    Affine2D,
++    Similarity2D,
++    fit_similarity_transform,
++    transform_cubic_path,
++)
++from planarcurve.types import CubicPath, CubicSegment
+ 
+ 
+ def test_affine_inverse_and_composition_order():
+@@ -139,3 +145,64 @@ def test_similarity_affine_conversion_is_consistent():
+     similarity = Similarity2D(scale=1.75, rotation_deg=37.0, dx=5.0, dy=-8.0)
+     points = np.array([[0.0, 1.0], [2.0, -3.0]])
+     np.testing.assert_allclose(similarity.as_affine().apply(points), similarity.apply(points))
++
++
++def _sample_cubic(bezier, parameters: np.ndarray) -> np.ndarray:
++    points = np.asarray([bezier.p0, bezier.p1, bezier.p2, bezier.p3])
++    t = parameters[:, None]
++    one_minus_t = 1.0 - t
++    return (
++        one_minus_t**3 * points[0]
++        + 3.0 * one_minus_t**2 * t * points[1]
++        + 3.0 * one_minus_t * t**2 * points[2]
++        + t**3 * points[3]
++    )
++
++
++def _sample_path(path: CubicPath, parameters: np.ndarray) -> tuple[np.ndarray, ...]:
++    return tuple(_sample_cubic(bezier, parameters) for bezier in path.to_beziers())
++
++
++def test_transform_cubic_path_identity_and_translation():
++    path = CubicPath(
++        start=(1.0, 2.0),
++        segments=(
++            CubicSegment((2.0, 3.0), (4.0, 3.0), (5.0, 1.0)),
++            CubicSegment((6.0, 0.0), (7.0, 3.0), (8.0, 2.0)),
++        ),
++    )
++
++    assert transform_cubic_path(path, Affine2D.identity()) == path
++    translated = transform_cubic_path(path, Affine2D.translation_only(3.0, -4.0))
++    np.testing.assert_allclose(translated.start, [4.0, -2.0])
++    np.testing.assert_allclose(translated.segments[0].c1, [5.0, -1.0])
++    np.testing.assert_allclose(translated.segments[0].c2, [7.0, -1.0])
++    np.testing.assert_allclose(translated.segments[0].end, [8.0, -3.0])
++    np.testing.assert_allclose(translated.segments[1].end, [11.0, -2.0])
++    assert len(translated.segments) == len(path.segments)
++
++
++def test_transform_cubic_path_similarity_matches_affine_and_sampled_points():
++    path = CubicPath(
++        start=(1.0, 2.0),
++        segments=(
++            CubicSegment((2.0, 3.0), (4.0, 3.0), (5.0, 1.0)),
++            CubicSegment((6.0, 0.0), (7.0, 3.0), (8.0, 2.0)),
++        ),
++    )
++    transform = Similarity2D(scale=1.7, rotation_deg=37.0, dx=5.0, dy=-8.0)
++    transformed = transform_cubic_path(path, transform)
++    affine_transformed = transform_cubic_path(path, transform.as_affine())
++
++    assert transformed == affine_transformed
++    parameters = np.linspace(0.0, 1.0, 17)
++    for original_samples, transformed_samples in zip(
++        _sample_path(path, parameters),
++        _sample_path(transformed, parameters),
++        strict=True,
++    ):
++        np.testing.assert_allclose(
++            transformed_samples,
++            transform.apply(original_samples),
++            atol=1e-12,
++        )

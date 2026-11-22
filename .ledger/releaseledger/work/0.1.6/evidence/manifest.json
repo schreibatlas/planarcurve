@@ -1,0 +1,39 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 1021,
+      "deletions": 21,
+      "patch_file": "75cadd7.patch",
+      "patch_sha256": "eaa62b931dc75f831d12e0970c97adc3f006686aa256318f900e2b6fde6fc722",
+      "paths": [
+        "docs/api/fitting.md",
+        "docs/api/trajectory.md",
+        "docs/api/transforms.md",
+        "docs/examples.md",
+        "docs/guides/fitting.md",
+        "examples/refine_trajectory_complexity.py",
+        "planarcurve/__init__.py",
+        "planarcurve/fitting/__init__.py",
+        "planarcurve/fitting/model_selection.py",
+        "planarcurve/fitting/trajectory.py",
+        "planarcurve/trajectory.py",
+        "planarcurve/transforms.py",
+        "tests/test_examples.py",
+        "tests/test_trajectory_progressive_refinement.py",
+        "tests/test_transforms.py"
+      ],
+      "sha": "75cadd72276a562779c3e2b8ed961d80719c5e57",
+      "short_sha": "75cadd7",
+      "source_ref": "git:75cadd72276a562779c3e2b8ed961d80719c5e57"
+    }
+  ],
+  "git_base_ref": "c07fe324af3f9d3bf35a459df2ac8cf717f6e925",
+  "git_base_sha": "c07fe324af3f9d3bf35a459df2ac8cf717f6e925",
+  "git_head_ref": "75cadd72276a562779c3e2b8ed961d80719c5e57",
+  "git_head_sha": "75cadd72276a562779c3e2b8ed961d80719c5e57",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.1.6",
+  "schema_version": 1
+}

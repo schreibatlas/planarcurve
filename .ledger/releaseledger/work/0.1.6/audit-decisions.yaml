@@ -1,0 +1,26 @@
+rows:
+- sha: 75cadd72276a562779c3e2b8ed961d80719c5e57
+  inspected: true
+  inspected_paths:
+  - docs/api/fitting.md
+  - docs/api/trajectory.md
+  - docs/api/transforms.md
+  - docs/examples.md
+  - docs/guides/fitting.md
+  - examples/refine_trajectory_complexity.py
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/model_selection.py
+  - planarcurve/fitting/trajectory.py
+  - planarcurve/trajectory.py
+  - planarcurve/transforms.py
+  - tests/test_examples.py
+  - tests/test_trajectory_progressive_refinement.py
+  - tests/test_transforms.py
+  observed_behavior: "Exposes residual-guided, warm-started growth of single-trajectory heading-rate models when regularized score gains justify added knots; adds affine and similarity transforms for cubic paths, with public API docs, an example, and tests."
+  public_impact: public
+  decision: accepted
+  target_entry_key: null
+  target_entry_id: null
+  notes: ''
+  stale: false

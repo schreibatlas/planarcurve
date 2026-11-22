@@ -1,0 +1,49 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.1.6
+git_base_ref: c07fe324af3f9d3bf35a459df2ac8cf717f6e925
+git_base_sha: c07fe324af3f9d3bf35a459df2ac8cf717f6e925
+git_head_ref: 75cadd72276a562779c3e2b8ed961d80719c5e57
+git_head_sha: 75cadd72276a562779c3e2b8ed961d80719c5e57
+include_merges: nontrivial
+entries:
+- kind: added
+  summary: Added residual-guided growth of single-trajectory heading-rate models
+  status: accepted
+  source_refs:
+  - git:75cadd72276a562779c3e2b8ed961d80719c5e57
+  paths:
+  - docs/api/fitting.md
+  - docs/api/trajectory.md
+  - docs/examples.md
+  - docs/guides/fitting.md
+  - examples/refine_trajectory_complexity.py
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/model_selection.py
+  - planarcurve/fitting/trajectory.py
+  - planarcurve/trajectory.py
+  - tests/test_examples.py
+  - tests/test_trajectory_progressive_refinement.py
+  sources:
+  - git:75cadd72276a562779c3e2b8ed961d80719c5e57
+  prs: []
+  issues: []
+  contributors:
+  - '@holgern'
+- kind: added
+  summary: Added affine and similarity transforms for cubic paths
+  status: accepted
+  paths:
+  - docs/api/transforms.md
+  - planarcurve/__init__.py
+  - planarcurve/transforms.py
+  - tests/test_transforms.py
+  sources:
+  - git:75cadd72276a562779c3e2b8ed961d80719c5e57
+  prs: []
+  issues: []
+  contributors:
+  - '@holgern'
