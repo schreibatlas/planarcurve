@@ -99,13 +99,13 @@ def test_family_requires_observations_and_rejects_zero_length_curves():
         fit_trajectory_family([np.ones((5, 2))], fit_options=_options())
 
 
-def test_family_variation_policy_does_not_allow_position_offsets_yet():
-    with pytest.raises(NotImplementedError, match="change-position"):
-        fit_trajectory_family(
-            [_occurrence(_arc(), scale=1.0, rotation=0.0, dx=0.0, dy=0.0)],
-            fit_options=_options(),
-            variation_policy=TrajectoryVariationPolicy(allow_change_position_offsets=True),
-        )
+def test_family_with_position_offsets_allows_zero_change_topology():
+    result = fit_trajectory_family(
+        [_occurrence(_arc(), scale=1.0, rotation=0.0, dx=0.0, dy=0.0)],
+        fit_options=_options(),
+        variation_policy=TrajectoryVariationPolicy(allow_change_position_offsets=True),
+    )
+    assert result.occurrences[0].change_position_deviation == ()
 
 
 def test_very_short_but_nonzero_observations_are_fit():

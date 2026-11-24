@@ -17,7 +17,7 @@ except ImportError as exc:  # pragma: no cover - optional fitting extra
     ) from exc
 
 from ..trajectory import HeadingRateChange, HeadingRateProfile, Trajectory2D, trajectory_total_turn
-from ..transforms import Similarity2D
+from ..transforms import Similarity2D, SimilarityFitBounds, fit_bounded_similarity
 from ..types import _require_integer
 from .parameters import decode_positive, encode_positive
 from .trajectory import (
@@ -109,6 +109,11 @@ class TrajectoryOccurrenceFit:
     optimizer_evaluations: int
     rate_deviation: tuple[float, ...] = ()
 
+    change_position_deviation: tuple[float, ...] = ()
+    residuals: tuple[float, ...] = ()
+    placement_constrained: bool = False
+    variation_constrained: bool = False
+
     def __post_init__(self) -> None:
         metrics = (
             self.position_rmse,
@@ -116,6 +121,8 @@ class TrajectoryOccurrenceFit:
             self.endpoint_error,
             self.turn_error_deg,
             self.robust_cost,
+            *self.change_position_deviation,
+            *self.residuals,
             *self.rate_deviation,
         )
         if not np.isfinite(metrics).all():
@@ -132,6 +139,12 @@ class TrajectoryOccurrenceFit:
             "rate_deviation",
             tuple(float(value) for value in self.rate_deviation),
         )
+        object.__setattr__(
+            self,
+            "change_position_deviation",
+            tuple(float(value) for value in self.change_position_deviation),
+        )
+        object.__setattr__(self, "residuals", tuple(float(value) for value in self.residuals))
 
 
 @dataclass(frozen=True)
@@ -162,10 +175,23 @@ class TrajectoryFamilyFitResult:
         object.__setattr__(self, "occurrences", occurrences)
 
 
-def _trajectory_with_rate_offsets(trajectory: Trajectory2D, offsets: np.ndarray) -> Trajectory2D:
+def _trajectory_with_rate_offsets(
+    trajectory: Trajectory2D,
+    offsets: np.ndarray,
+    position_offsets: np.ndarray | None = None,
+    min_spacing: float = 0.0,
+) -> Trajectory2D:
     profile = trajectory.heading_rate
+    positions = np.asarray([change.at for change in profile.changes], dtype=float)
+    if position_offsets is not None and positions.size:
+        spacing = np.arange(positions.size) * min_spacing
+        shifted = np.maximum.accumulate(positions + position_offsets - spacing) + spacing
+        for index in range(positions.size - 1, -1, -1):
+            upper = 1.0 - min_spacing * (positions.size - index)
+            shifted[index] = min(shifted[index], upper)
+        positions = shifted
     changes = tuple(
-        HeadingRateChange(change.at, change.heading_rate_deg_per_u + float(offset))
+        HeadingRateChange(float(positions[index]), change.heading_rate_deg_per_u + float(offset))
         for change, offset in zip(profile.changes, offsets[1:-1], strict=True)
     )
     return Trajectory2D(
@@ -220,9 +246,11 @@ def _fit_occurrence_with_variation(
     rng: np.random.Generator,
 ) -> tuple[Trajectory2D, Similarity2D, np.ndarray, bool, int, float]:
     rate_count = options.change_count + 2
+    position_count = options.change_count
     initial = np.concatenate(
         (
             np.zeros(rate_count),
+            np.zeros(position_count),
             [
                 encode_positive(transform.scale),
                 transform.rotation_deg,
@@ -246,13 +274,22 @@ def _fit_occurrence_with_variation(
         policy.rate_sigma,
         options.max_heading_rate_deg_per_u - base_rates,
     )
-    lower = np.concatenate((rate_lower, np.full(4, -np.inf)))
-    upper = np.concatenate((rate_upper, np.full(4, np.inf)))
+    lower = np.concatenate(
+        (rate_lower, np.full(position_count, -policy.position_sigma), np.full(4, -np.inf))
+    )
+    upper = np.concatenate(
+        (rate_upper, np.full(position_count, policy.position_sigma), np.full(4, np.inf))
+    )
     target_points, target_heading, target_length = _target_state(points, options)
 
     def decode(values: np.ndarray) -> tuple[Trajectory2D, Similarity2D]:
-        occurrence_trajectory = _trajectory_with_rate_offsets(trajectory, values[:rate_count])
-        base = rate_count
+        occurrence_trajectory = _trajectory_with_rate_offsets(
+            trajectory,
+            values[:rate_count],
+            values[rate_count : rate_count + position_count],
+            options.min_change_spacing,
+        )
+        base = rate_count + position_count
         occurrence_transform = Similarity2D(
             scale=decode_positive(float(values[base])),
             rotation_deg=float(values[base + 1]),
@@ -271,7 +308,13 @@ def _fit_occurrence_with_variation(
             occurrence_transform,
             options,
         )
-        return np.concatenate((fit_residuals, values[:rate_count] / policy.rate_sigma))
+        return np.concatenate(
+            (
+                fit_residuals,
+                values[:rate_count] / policy.rate_sigma,
+                values[rate_count : rate_count + position_count] / policy.position_sigma,
+            )
+        )
 
     best = None
     for attempt in range(options.restarts + 1):
@@ -298,13 +341,99 @@ def _fit_occurrence_with_variation(
 
     occurrence_trajectory, occurrence_transform = decode(best.x)
     deviations = best.x[:rate_count].copy()
+    position_deviations = np.asarray(
+        [change.at for change in occurrence_trajectory.heading_rate.changes]
+    ) - np.asarray([change.at for change in trajectory.heading_rate.changes])
     return (
         occurrence_trajectory,
         occurrence_transform,
         deviations,
+        position_deviations,
         bool(best.success),
         int(best.nfev),
         float(best.cost),
+    )
+
+
+def fit_trajectory_family_occurrence(
+    model: TrajectoryFamilyModel,
+    points: ArrayLike,
+    *,
+    fit_options: TrajectoryFitOptions,
+    variation_policy: TrajectoryVariationPolicy | None = None,
+    placement_bounds: SimilarityFitBounds | None = None,
+) -> TrajectoryOccurrenceFit:
+    """Fit one ordered observation to a fixed trajectory-family mean."""
+    if not isinstance(model, TrajectoryFamilyModel):
+        raise TypeError("model must be a TrajectoryFamilyModel")
+    if not isinstance(fit_options, TrajectoryFitOptions):
+        raise TypeError("fit_options must be TrajectoryFitOptions")
+    if variation_policy is not None and not isinstance(variation_policy, TrajectoryVariationPolicy):
+        raise TypeError("variation_policy must be a TrajectoryVariationPolicy or None")
+    if len(model.trajectory.heading_rate.changes) != fit_options.change_count:
+        raise ValueError("fit_options.change_count must match the fixed family topology")
+    target_points, target_heading, target_length = _target_state(points, fit_options)
+    source_points, _ = _mapped_state(model.trajectory, Similarity2D(), fit_options.samples)
+    placement = fit_bounded_similarity(
+        target_points,
+        source_points,
+        bounds=placement_bounds or SimilarityFitBounds(),
+    )
+    fitted_trajectory = model.trajectory
+    fitted_transform = placement.transform
+    rate_count = fit_options.change_count + 2
+    rate_deviation = np.zeros(rate_count)
+    position_deviation = np.zeros(fit_options.change_count)
+    optimizer_success = True
+    optimizer_evaluations = 0
+    variation_constrained = False
+    if variation_policy is not None and placement_bounds is None:
+        (
+            fitted_trajectory,
+            fitted_transform,
+            rate_deviation,
+            position_deviation,
+            optimizer_success,
+            optimizer_evaluations,
+            _,
+        ) = _fit_occurrence_with_variation(
+            model.trajectory,
+            points,
+            placement.transform,
+            fit_options,
+            variation_policy,
+            np.random.default_rng(fit_options.seed),
+        )
+        variation_constrained = bool(
+            np.any(np.abs(rate_deviation) >= variation_policy.rate_sigma - 1e-6)
+            or np.any(np.abs(position_deviation) >= variation_policy.position_sigma - 1e-6)
+        )
+    residuals = _profile_residuals(
+        fitted_trajectory,
+        target_points,
+        target_heading,
+        target_length,
+        fitted_transform,
+        fit_options,
+    )
+    position_rmse, heading_rmse, endpoint_error, turn_error, _ = _occurrence_metrics(
+        fitted_trajectory, fitted_transform, points, fit_options
+    )
+    return TrajectoryOccurrenceFit(
+        transform=fitted_transform,
+        position_rmse=position_rmse,
+        heading_rmse_deg=heading_rmse,
+        endpoint_error=endpoint_error,
+        turn_error_deg=turn_error,
+        robust_cost=_soft_l1_cost(residuals, fit_options.robust_scale),
+        accepted=optimizer_success,
+        optimizer_success=optimizer_success,
+        optimizer_evaluations=optimizer_evaluations,
+        rate_deviation=tuple(float(value) for value in rate_deviation),
+        change_position_deviation=tuple(float(value) for value in position_deviation),
+        residuals=tuple(float(value) for value in residuals),
+        placement_constrained=placement.rotation_constrained or placement.scale_constrained,
+        variation_constrained=variation_constrained,
     )
 
 
@@ -327,17 +456,18 @@ def fit_trajectory_family(
         raise TypeError("fit_options must be TrajectoryFitOptions")
     if variation_policy is not None and not isinstance(variation_policy, TrajectoryVariationPolicy):
         raise TypeError("variation_policy must be a TrajectoryVariationPolicy or None")
-    if variation_policy is not None and variation_policy.allow_change_position_offsets:
-        raise NotImplementedError("per-occurrence change-position offsets are not supported")
 
     shared = fit_shared_trajectory_profile(occurrences, fit_options)
     trajectory = shared.trajectory
     transforms = shared.transforms
     deviations = [np.zeros(fit_options.change_count + 2) for _ in occurrences]
     optimizer_status = [(shared.success, shared.optimizer_evaluations) for _ in occurrences]
+    position_deviations = [np.zeros(fit_options.change_count) for _ in occurrences]
     robust_costs = []
 
-    if variation_policy is not None and variation_policy.allow_rate_offsets:
+    if variation_policy is not None and (
+        variation_policy.allow_rate_offsets or variation_policy.allow_change_position_offsets
+    ):
         rng = np.random.default_rng(fit_options.seed)
         varied = [
             _fit_occurrence_with_variation(
@@ -347,9 +477,10 @@ def fit_trajectory_family(
         ]
         transforms = tuple(item[1] for item in varied)
         deviations = [item[2] for item in varied]
-        optimizer_status = [(item[3], item[4]) for item in varied]
+        position_deviations = [item[3] for item in varied]
+        optimizer_status = [(item[4], item[5]) for item in varied]
         trajectories = [item[0] for item in varied]
-        robust_costs = [item[5] for item in varied]
+        robust_costs = [item[6] for item in varied]
     else:
         trajectories = [trajectory] * len(occurrences)
 
@@ -377,6 +508,9 @@ def fit_trajectory_family(
                 optimizer_success=optimizer_status[index][0],
                 optimizer_evaluations=optimizer_status[index][1],
                 rate_deviation=tuple(float(value) for value in deviations[index]),
+                change_position_deviation=tuple(
+                    float(value) for value in position_deviations[index]
+                ),
             )
         )
 
@@ -396,6 +530,7 @@ def fit_trajectory_family(
             optimizer_success=item.optimizer_success,
             optimizer_evaluations=item.optimizer_evaluations,
             rate_deviation=item.rate_deviation,
+            change_position_deviation=item.change_position_deviation,
         )
         for item in occurrence_results
     ]
@@ -405,6 +540,13 @@ def fit_trajectory_family(
         f"rate_{index}": float(np.std(rate_deviation_matrix[:, index]))
         for index in range(rate_deviation_matrix.shape[1])
     }
+    position_deviation_matrix = np.asarray(position_deviations)
+    parameter_scale.update(
+        {
+            f"change_position_{index}": float(np.std(position_deviation_matrix[:, index]))
+            for index in range(position_deviation_matrix.shape[1])
+        }
+    )
     position_errors = [item.position_rmse for item in occurrence_results]
     heading_errors = [item.heading_rmse_deg for item in occurrence_results]
     model = TrajectoryFamilyModel(

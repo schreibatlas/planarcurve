@@ -4,6 +4,7 @@ from .family import (
     TrajectoryOccurrenceFit,
     TrajectoryVariationPolicy,
     fit_trajectory_family,
+    fit_trajectory_family_occurrence,
 )
 from .model_selection import (
     TrajectoryModelCandidate,
@@ -59,6 +60,7 @@ __all__ = [
     "fit_shared_trajectory_profile",
     "fit_trajectory",
     "fit_trajectory_family",
+    "fit_trajectory_family_occurrence",
     "select_shared_trajectory_model",
     "select_trajectory_model",
     "refine_trajectory_model",

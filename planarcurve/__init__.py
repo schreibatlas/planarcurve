@@ -35,6 +35,10 @@ from .trajectory_chain import (
 from .transforms import (
     Affine2D,
     Similarity2D,
+    SimilarityFitBounds,
+    SimilarityFitResult,
+    fit_bounded_similarity,
+    fit_bounded_similarity_transform,
     fit_similarity_transform,
     transform_cubic_path,
 )
@@ -67,6 +71,10 @@ __all__ = [
     "Pose2D",
     "Similarity2D",
     "fit_similarity_transform",
+    "SimilarityFitBounds",
+    "SimilarityFitResult",
+    "fit_bounded_similarity",
+    "fit_bounded_similarity_transform",
     "Trajectory2D",
     "TrajectorySample",
     "__version__",

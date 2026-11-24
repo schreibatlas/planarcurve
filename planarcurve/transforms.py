@@ -279,3 +279,143 @@ def fit_similarity_transform(
         dx=float(translation[0]),
         dy=float(translation[1]),
     )
+
+
+@dataclass(frozen=True)
+class SimilarityFitBounds:
+    """Optional inclusive bounds for a positive-scale similarity fit."""
+
+    rotation_min_deg: float | None = None
+    rotation_max_deg: float | None = None
+    scale_min: float | None = None
+    scale_max: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("rotation_min_deg", "rotation_max_deg", "scale_min", "scale_max"):
+            value = getattr(self, name)
+            if value is not None and not isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if (
+            self.rotation_min_deg is not None
+            and self.rotation_max_deg is not None
+            and self.rotation_min_deg > self.rotation_max_deg
+        ):
+            raise ValueError("rotation_min_deg must not exceed rotation_max_deg")
+        if any(value is not None and value <= 0.0 for value in (self.scale_min, self.scale_max)):
+            raise ValueError("scale bounds must be positive")
+        if (
+            self.scale_min is not None
+            and self.scale_max is not None
+            and self.scale_min > self.scale_max
+        ):
+            raise ValueError("scale_min must not exceed scale_max")
+
+    @classmethod
+    def symmetric_rotation(cls, max_abs_deg: float = 15.0) -> SimilarityFitBounds:
+        if not isfinite(max_abs_deg) or max_abs_deg < 0.0:
+            raise ValueError("max_abs_deg must be nonnegative and finite")
+        return cls(rotation_min_deg=-max_abs_deg, rotation_max_deg=max_abs_deg)
+
+
+@dataclass(frozen=True)
+class SimilarityFitResult:
+    """Bounded similarity transform and least-squares diagnostics."""
+
+    transform: Similarity2D
+    mean_squared_error: float
+    rotation_constrained: bool
+    scale_constrained: bool
+
+
+def fit_bounded_similarity(
+    target: ArrayLike,
+    source: ArrayLike,
+    *,
+    bounds: SimilarityFitBounds,
+    weights: ArrayLike | None = None,
+) -> SimilarityFitResult:
+    """Fit a positive-scale, orientation-preserving transform within bounds."""
+    if not isinstance(bounds, SimilarityFitBounds):
+        raise TypeError("bounds must be SimilarityFitBounds")
+    target_values = np.asarray(target, dtype=float)
+    source_values = np.asarray(source, dtype=float)
+    # Reuse the unrestricted fitter for its shared shape, weights, and degeneracy checks.
+    unconstrained = fit_similarity_transform(target_values, source_values, weights=weights)
+    if weights is None:
+        fit_weights = np.ones(len(source_values), dtype=float)
+    else:
+        fit_weights = np.asarray(weights, dtype=float)
+    active = fit_weights > 0.0
+    source_values, target_values = source_values[active], target_values[active]
+    fit_weights = fit_weights[active] / np.sum(fit_weights[active])
+
+    source_origin, target_origin = source_values[0], target_values[0]
+    source_offsets, target_offsets = source_values - source_origin, target_values - target_origin
+    source_extent = float(np.max(np.abs(source_offsets)))
+    target_extent = float(np.max(np.abs(target_offsets)))
+    source_scaled, target_scaled = source_offsets / source_extent, target_offsets / target_extent
+    source_mean = fit_weights @ source_scaled
+    target_mean = fit_weights @ target_scaled
+    x = source_scaled - source_mean
+    y = target_scaled - target_mean
+    variance = float(np.sum(fit_weights * np.sum(x * x, axis=1)))
+
+    def rotation_allowed(angle: float) -> bool:
+        lo, hi = bounds.rotation_min_deg, bounds.rotation_max_deg
+        if lo is None and hi is None:
+            return True
+        low = lo if lo is not None else -np.inf
+        high = hi if hi is not None else np.inf
+        first_turn = int(np.ceil((low - angle) / 360.0)) if np.isfinite(low) else 0
+        last_turn = int(np.floor((high - angle) / 360.0)) if np.isfinite(high) else 0
+        return first_turn <= last_turn
+
+    angle = unconstrained.rotation_deg
+    rotation_constrained = not rotation_allowed(angle)
+    candidates: list[float] = []
+    if not rotation_constrained:
+        candidates.append(angle)
+    for boundary in (bounds.rotation_min_deg, bounds.rotation_max_deg):
+        if boundary is not None:
+            candidates.append(boundary)
+    if not candidates:
+        candidates.append(angle)
+
+    best: tuple[float, Similarity2D, bool] | None = None
+    for candidate in candidates:
+        radians_value = radians(candidate)
+        c, s = cos(radians_value), sin(radians_value)
+        rotated = x @ np.array([[c, s], [-s, c]])
+        raw_scale = float(np.sum(fit_weights[:, None] * rotated * y) / variance)
+        scale = raw_scale * target_extent / source_extent
+        bounded_scale = max(scale, bounds.scale_min or np.finfo(float).tiny)
+        if bounds.scale_max is not None:
+            bounded_scale = min(bounded_scale, bounds.scale_max)
+        scale_constrained = not np.isclose(bounded_scale, scale, rtol=1e-12, atol=1e-15)
+
+        translation = (target_origin + target_extent * target_mean) - bounded_scale * (
+            source_origin + source_extent * source_mean
+        ) @ np.array([[c, -s], [s, c]]).T
+        transform = Similarity2D(
+            scale=bounded_scale,
+            rotation_deg=candidate,
+            dx=float(translation[0]),
+            dy=float(translation[1]),
+        )
+        residual = bounded_scale * source_extent * rotated - target_extent * y
+        error = float(np.sum(fit_weights * np.sum(residual * residual, axis=1)))
+        if best is None or error < best[0]:
+            best = (error, transform, scale_constrained)
+    assert best is not None
+    return SimilarityFitResult(best[1], best[0], rotation_constrained, best[2])
+
+
+def fit_bounded_similarity_transform(
+    target: ArrayLike,
+    source: ArrayLike,
+    *,
+    bounds: SimilarityFitBounds,
+    weights: ArrayLike | None = None,
+) -> Similarity2D:
+    """Fit a bounded similarity and return only its transform."""
+    return fit_bounded_similarity(target, source, bounds=bounds, weights=weights).transform
