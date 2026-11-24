@@ -1,0 +1,44 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 14,
+      "deletions": 0,
+      "patch_file": "9a904a1.patch",
+      "patch_sha256": "9bae30041a1035e7a24de0d95f12646e578bb586b023eeee27c2fa9a8897db63",
+      "paths": [
+        "CHANGELOG.md"
+      ],
+      "sha": "9a904a1a9c006ba2bf487dc67eccdf2605ae3f50",
+      "short_sha": "9a904a1",
+      "source_ref": "git:9a904a1a9c006ba2bf487dc67eccdf2605ae3f50"
+    },
+    {
+      "additions": 442,
+      "deletions": 34,
+      "patch_file": "3bc76cf.patch",
+      "patch_sha256": "05ba8bf96ece521ed3e9b079471f862d61fb3c3b7dd01614c1b1985f3e544329",
+      "paths": [
+        "CHANGELOG.md",
+        "planarcurve/__init__.py",
+        "planarcurve/fitting/__init__.py",
+        "planarcurve/fitting/family.py",
+        "planarcurve/transforms.py",
+        "tests/test_bounded_similarity.py",
+        "tests/test_trajectory_family.py",
+        "tests/test_trajectory_family_occurrence.py"
+      ],
+      "sha": "3bc76cf4e8876c1c01ce0e53233711c6cb64e189",
+      "short_sha": "3bc76cf",
+      "source_ref": "git:3bc76cf4e8876c1c01ce0e53233711c6cb64e189"
+    }
+  ],
+  "git_base_ref": "9ba014ee5c640ba13b76cfe9efbd7f8efea0e714",
+  "git_base_sha": "9ba014ee5c640ba13b76cfe9efbd7f8efea0e714",
+  "git_head_ref": "3bc76cf4e8876c1c01ce0e53233711c6cb64e189",
+  "git_head_sha": "3bc76cf4e8876c1c01ce0e53233711c6cb64e189",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.1.7",
+  "schema_version": 1
+}

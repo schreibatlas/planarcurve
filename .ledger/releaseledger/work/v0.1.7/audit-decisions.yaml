@@ -1,0 +1,29 @@
+rows:
+- sha: 9a904a1a9c006ba2bf487dc67eccdf2605ae3f50
+  inspected: true
+  inspected_paths:
+  - CHANGELOG.md
+  observed_behavior: Added the generated root changelog with historical release sections; no library behavior changed.
+  public_impact: internal
+  decision: internal
+  target_entry_key: null
+  target_entry_id: null
+  notes: Release-history artifact only, not a product or user documentation change.
+  stale: false
+- sha: 3bc76cf4e8876c1c01ce0e53233711c6cb64e189
+  inspected: true
+  inspected_paths:
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/family.py
+  - planarcurve/transforms.py
+  - tests/test_bounded_similarity.py
+  - tests/test_trajectory_family.py
+  - tests/test_trajectory_family_occurrence.py
+  observed_behavior: Added bounded positive-scale similarity fitting and public single-occurrence fitting against a fixed trajectory-family model, including optional per-occurrence rate and change-position variation with diagnostics.
+  public_impact: public
+  decision: accepted
+  target_entry_key: bounded-similarity-and-fixed-occurrence-fitting
+  target_entry_id: null
+  notes: Reviewed implementation, public exports, and focused tests.
+  stale: false

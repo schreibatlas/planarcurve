@@ -1,0 +1,67 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.1.7
+git_base_ref: v0.1.6
+git_base_sha: 9ba014ee5c640ba13b76cfe9efbd7f8efea0e714
+git_head_ref: HEAD
+git_head_sha: 3bc76cf4e8876c1c01ce0e53233711c6cb64e189
+git_range: 9ba014ee5c640ba13b76cfe9efbd7f8efea0e714..3bc76cf4e8876c1c01ce0e53233711c6cb64e189
+commit_count: 2
+rows:
+- sha: 9a904a1a9c006ba2bf487dc67eccdf2605ae3f50
+  source_ref: git:9a904a1a9c006ba2bf487dc67eccdf2605ae3f50
+  short_sha: 9a904a1
+  changed_paths:
+  - CHANGELOG.md
+  stats:
+    files_changed: 1
+    insertions: 14
+    deletions: 0
+  inspected: true
+  inspected_paths:
+  - CHANGELOG.md
+  observed_behavior: Added the generated root changelog with historical release sections;
+    no library behavior changed.
+  public_impact: internal
+  decision: internal
+  stale: false
+  evidence_subject: 'doc: changelog'
+  notes: Release-history artifact only, not a product or user documentation change.
+- sha: 3bc76cf4e8876c1c01ce0e53233711c6cb64e189
+  source_ref: git:3bc76cf4e8876c1c01ce0e53233711c6cb64e189
+  short_sha: 3bc76cf
+  changed_paths:
+  - CHANGELOG.md
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/family.py
+  - planarcurve/transforms.py
+  - tests/test_bounded_similarity.py
+  - tests/test_trajectory_family.py
+  - tests/test_trajectory_family_occurrence.py
+  stats:
+    files_changed: 8
+    insertions: 442
+    deletions: 34
+  inspected: true
+  inspected_paths:
+  - planarcurve/__init__.py
+  - planarcurve/fitting/__init__.py
+  - planarcurve/fitting/family.py
+  - planarcurve/transforms.py
+  - tests/test_bounded_similarity.py
+  - tests/test_trajectory_family.py
+  - tests/test_trajectory_family_occurrence.py
+  observed_behavior: Added bounded positive-scale similarity fitting and public single-occurrence
+    fitting against a fixed trajectory-family model, including optional per-occurrence
+    rate and change-position variation with diagnostics.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: transforms and other tools'
+  target_entry_key: bounded-similarity-and-fixed-occurrence-fitting
+  target_entry_id: entry-0001
+  notes: Reviewed implementation, public exports, and focused tests.
